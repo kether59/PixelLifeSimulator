@@ -1,0 +1,289 @@
+@startuml PixelLife UML Class Diagram
+
+title PixelLife Simulator - Architecture Classes
+
+' === PACKAGES ===
+package "com.kether.pixellife.common" as common {
+    package dto {
+        class SimulationDtos {
+            +record EntitySnapshot
+            +record GridSnapshot
+            +record SimulationStartRequest
+            +record SimulationStartResponse
+        }
+    }
+
+    package event {
+        class SimulationEvent {
+            +record StepCompleted
+            +record EntityDied
+            +record EntityAte
+            +record EntityReproduced
+            +record EntityMerged
+            +record SimulationEnded
+        }
+    }
+
+    package model {
+        class Position {
+            +int x, y, z
+            +Position translate(int, int, int)
+            +double distanceTo(Position)
+        }
+
+        class DNA {
+            +float speed, size, vision
+            +float metabolism, aggression
+            +float reproEnergy, reproRadius
+            +DNA mutate(float, RandomGenerator)
+            +DNA crossover(DNA, DNA, RandomGenerator)
+        }
+
+        enum Gender {
+            MALE
+            FEMALE
+        }
+
+        class SimulationConfig {
+            +int width, height
+            +int plantCount, organismCount, nutrientCount
+            +int maxSteps
+            +long seed
+            +float mutationRate
+        }
+    }
+}
+
+package "com.kether.pixellife.backend" as backend {
+    package api {
+        class SimulationController {
+            +GridSnapshot getCurrentSnapshot(long simId)
+            +boolean setTickDelay(long simId, long delayMs)
+            +SimulationStartResponse startSimulation(SimulationStartRequest)
+        }
+    }
+
+    package engine {
+        class SimulationEngine {
+            -Grid grid
+            -EcosystemRegulator regulator
+            +void run(long initialTickDelayMs)
+            +void tick()
+            +List<Entity> getSnapshot()
+        }
+
+        class Grid {
+            -Map<Position, List<Entity>> spatialIndex
+            +boolean isFree(Position)
+            +Optional<Position> findFreePositionNear(Position, int)
+            +List<Entity> getEntitiesAt(Position)
+            +void addEntity(Entity)
+            +void removeEntity(Entity)
+        }
+
+        class EcosystemRegulator {
+            -float plantPhotosynthesisBonus
+            -float organismMetabolismPenalty
+            -float nutrientSpawnRate
+            +void regulate(long step, GridSimulationContext)
+            +void saveParams()
+            +void loadParams()
+        }
+
+        interface SimulationContext {
+            +List<Entity> getEntitiesAt(Position)
+            +List<Entity> getEntitiesInRadius(Position, int)
+            +boolean isFree(Position)
+            +Optional<Position> findFreePositionNear(Position, int)
+            +int getWidth(), getHeight(), getDepth()
+            +long getCurrentStep()
+            +float getMutationRate()
+            +float getPlantPhotosynthesisBonus()
+            +float getOrganismMetabolismPenalty()
+            +void spawnNutrientNear(Position, float)
+            +void spawnPlantNear(Position)
+            +void spawnOrganism(Organism)
+        }
+
+        class GridSimulationContext {
+            -List<Entity> toAdd, toRemove
+            +void flush()
+        }
+    }
+
+    package model {
+        abstract class Entity {
+            #long id
+            #Position position
+            #float energy
+            #boolean alive
+            +abstract void update(SimulationContext)
+            +abstract String typeName()
+            +void consumeEnergy(float)
+            +boolean isDead()
+        }
+
+        class Organism {
+            -DNA dna
+            -Gender gender
+            -int generation, age
+            -int reproductionCooldown, mergeCooldown
+            +void update(SimulationContext)
+            +void move(SimulationContext)
+            +void eat(SimulationContext)
+            +void reproduce(SimulationContext)
+            +void tryMerge(SimulationContext)
+            +Position chooseMoveTarget(SimulationContext)
+        }
+
+        class Plant {
+            -float growthRate, height
+            +void update(SimulationContext)
+            +float getRenderHeight()
+            +float getRenderRadius()
+        }
+
+        class Nutrient {
+            -float richness
+            -float vx, vy, vz, fx, fy, fz
+            +void update(SimulationContext)
+            +void drift(SimulationContext)
+            +float[] getFloatPosition()
+        }
+    }
+
+    package service {
+        class SimulationService {
+            +Optional<GridSnapshot> getCurrentSnapshot(long simId)
+            +boolean setTickDelay(long simId, long delayMs)
+            +SimulationStartResponse startSimulation(SimulationStartRequest)
+        }
+    }
+
+    package persistence {
+        package entity {
+            class SimulationRecord {
+                +Long id
+                +int gridWidth, gridHeight
+                +int plantCount, organismCount, nutrientCount
+                +float mutationRate
+                +int maxSteps
+                +long seed
+                +long totalSteps
+                +SimulationStatus status
+            }
+        }
+
+        package repository {
+            interface SimulationRepository {
+                +SimulationRecord save(SimulationRecord)
+                +Optional<SimulationRecord> findById(Long id)
+            }
+        }
+    }
+}
+
+package "com.kether.pixellife.frontend" as frontend {
+    package client {
+        class BackendClient {
+            +Optional<GridSnapshot> fetchGridSnapshot(long simId)
+            +SimulationStartResponse startSimulation(SimulationConfig)
+            +boolean setTickDelay(long simId, long delayMs)
+        }
+    }
+
+    package render {
+        class SimulationRenderer {
+            -int gridWidth, gridHeight, gridDepth
+            -long selectedEntityId
+            +void setControlPanel(ControlPanel)
+            +void switchToSimulation(long id)
+            +void run()
+            +void renderFrame()
+        }
+
+        class MeshBuilder {
+            +static void drawSphere(float radius, int stacks, int slices)
+            +static void drawCylinder(float radius, float height, int slices)
+            +static void drawOctahedron(float radius)
+        }
+
+        class Camera3D {
+            -float distance, yaw, pitch
+            -float targetX, targetY, targetZ
+            +void orbit(float deltaX, float deltaY)
+            +void pan(float deltaX, float deltaY)
+            +void zoom(float delta)
+            +void apply()
+        }
+    }
+
+    package ui {
+        class ControlPanel {
+            -JSpinner spinMaxSteps, spinMutationRate
+            -JButton btnStart, btnStop, btnPause
+            -JLabel lblStep, lblPlants, lblOrganisms, lblNutrients
+            +void updateStats(long step, int plants, int organisms, int nutrients)
+            +void notifySimulationEnded()
+        }
+
+        class PixelLifeFrontend {
+            +static void main(String[] args)
+        }
+    }
+}
+
+' === RELATIONS ===
+
+' Backend Engine
+SimulationEngine --> Grid : utilise
+SimulationEngine --> EcosystemRegulator : régule
+SimulationEngine --> GridSimulationContext : crée par tick
+SimulationEngine ..> SimulationEvent : publie
+
+GridSimulationContext ..|> SimulationContext : implémente
+GridSimulationContext --> Grid : accède
+GridSimulationContext --> EcosystemRegulator : utilise bonus/pénalités
+
+EcosystemRegulator --> Grid : observe populations
+
+' Entities
+Entity <|-- Organism : hérite
+Entity <|-- Plant : hérite
+Entity <|-- Nutrient : hérite
+
+Organism --> DNA : possède
+Organism --> Gender : possède
+Organism --> SimulationContext : utilise
+
+Plant --> SimulationContext : utilise
+Nutrient --> SimulationContext : utilise
+
+' Services & API
+SimulationController --> SimulationService : délègue
+SimulationService --> SimulationEngine : gère
+SimulationService --> SimulationRepository : persiste
+
+' Frontend
+SimulationRenderer --> BackendClient : récupère données
+SimulationRenderer --> ControlPanel : met à jour UI
+SimulationRenderer --> MeshBuilder : dessine formes
+SimulationRenderer --> Camera3D : contrôle vue
+
+ControlPanel --> BackendClient : envoie commandes
+
+PixelLifeFrontend --> SimulationRenderer : lance
+PixelLifeFrontend --> ControlPanel : lance
+
+' DTOs & Events
+SimulationDtos ..> Entity : snapshot
+SimulationEvent ..> Entity : événements
+
+' Common models
+DNA --> Gender : utilise pour couleur
+SimulationConfig --> Position : définit dimensions
+
+' Persistence
+SimulationRecord --> SimulationConfig : contient config
+
+@enduml

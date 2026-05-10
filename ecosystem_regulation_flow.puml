@@ -1,0 +1,120 @@
+@startuml Ecosystem Regulation Decision Flow
+
+title EcosystemRegulator.regulate() - Logique de Régulation Homéostatique
+
+start
+
+:EcosystemRegulator.regulate(step, context);
+
+if (step % REGULATION_INTERVAL != 0 ?) then (non)
+    stop
+endif
+
+:regulationCount++
+
+:Observer populations actuelles
+plants = countAlive(Plant.class)
+organisms = countAlive(Organism.class)
+nutrients = countAlive(Nutrient.class)
+
+:Calculer ratios
+plantRatio = plants / initialPlants
+organismRatio = organisms / initialOrganisms
+nutrientRatio = nutrients / initialNutrients
+
+:EMA organismRatio (α=0.1)
+avgOrganismRatio = 0.9 * avg + 0.1 * organismRatio
+
+:crisis = false
+
+if (plantRatio < CRITICAL_RATIO_PLANT ?) then (oui)
+    :Injection d'urgence plantes
+    injectCount = max(3, initialPlants * 0.10f)
+    injectPlants(injectCount, context)
+    crisis = true
+    log "Injection plantes: " + injectCount
+endif
+
+if (organismRatio < CRITICAL_RATIO_ORGANISM ?) then (oui)
+    :Injection d'urgence organismes
+    injectCount = max(3, initialOrganisms * 0.10f)
+    injectOrganisms(injectCount, context)
+    crisis = true
+    log "Injection organismes: " + injectCount
+endif
+
+if (nutrientRatio < CRITICAL_RATIO_NUTRIENT ?) then (oui)
+    :Injection d'urgence nutriments
+    injectCount = max(5, initialNutrients * 0.15f)
+    injectNutrients(injectCount, context)
+    log "Injection nutriments: " + injectCount
+endif
+
+if (organisms > plants * 3 ?) then (oui)
+    :Surpopulation organismes détectée
+    log "Surpopulation: " + organisms + " vs " + plants + " plantes"
+endif
+
+if (RNG.nextFloat() < nutrientSpawnRate ?) then (oui)
+    :Spawn nutriment spontané
+    spawnRandomNutrient(context)
+endif
+
+:adjustAdaptiveParams(plantRatio, organismRatio, nutrientRatio, crisis, step)
+
+if (crisis ?) then (oui)
+    :stepsSinceLastExtinctionRisk = 0
+else
+    :stepsSinceLastExtinctionRisk += REGULATION_INTERVAL
+endif
+
+stop
+
+partition "adjustAdaptiveParams() - Ajustements Adaptatifs" as adjust {
+
+start
+
+:adjustAdaptiveParams()
+
+:float lr = 0.002f  // learning rate
+
+if (plantRatio < 0.5f ?) then (oui)
+    :Augmenter bonus photosynthèse
+    plantPhotosynthesisBonus += lr * (0.5f - plantRatio)
+
+    :Augmenter reproduction plantes
+    plantReproductionBonus += lr * 0.5f * (0.5f - plantRatio)
+endif
+
+if (plantRatio > 2.0f ?) then (oui)
+    :Réduire bonus photosynthèse
+    plantPhotosynthesisBonus -= lr * (plantRatio - 2.0f)
+endif
+
+if (avgOrganismRatio > 1.5f ?) then (oui)
+    :Augmenter pénalité métabolisme
+    organismMetabolismPenalty += lr * (avgOrganismRatio - 1.5f)
+endif
+
+if (avgOrganismRatio < 0.5f ?) then (oui)
+    :Réduire pénalité métabolisme
+    organismMetabolismPenalty -= lr
+endif
+
+if (nutrientRatio < 0.3f ?) then (oui)
+    :Augmenter taux spawn nutriments
+    nutrientSpawnRate += lr * 0.1f
+endif
+
+if (nutrientRatio > 1.5f ?) then (oui)
+    :Réduire taux spawn nutriments
+    nutrientSpawnRate -= lr * 0.05f
+endif
+
+:Clamp tous les paramètres dans leurs limites
+
+stop
+
+}
+
+@enduml

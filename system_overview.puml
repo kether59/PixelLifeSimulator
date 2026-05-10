@@ -1,0 +1,135 @@
+@startuml PixelLife System Architecture Overview
+
+title PixelLife - Architecture Générale et Flux de Données
+
+skinparam backgroundColor #FEFEFE
+skinparam componentStyle uml2
+
+' === ACTORS ===
+actor "Utilisateur" as User
+
+' === FRONTEND ===
+package "Frontend (LWJGL/OpenGL)" as Frontend {
+    [SimulationRenderer] as Renderer
+    [ControlPanel] as UI
+    [BackendClient] as Client
+    [Camera3D] as Camera
+}
+
+' === BACKEND ===
+package "Backend (Spring Boot)" as Backend {
+    [SimulationController] as Controller
+    [SimulationService] as Service
+    [SimulationEngine] as Engine
+    [Grid] as Grid
+    [EcosystemRegulator] as Regulator
+    [SimulationRepository] as Repo
+}
+
+' === ENTITIES ===
+package "Entities" as Entities {
+    [Organism] as Org
+    [Plant] as Plt
+    [Nutrient] as Nut
+}
+
+' === COMMON ===
+package "Common" as Common {
+    [SimulationConfig] as Config
+    [DNA] as DNA
+    [Position] as Pos
+    [SimulationEvent] as Event
+    [SimulationDtos] as DTOs
+}
+
+' === DATABASE ===
+database "H2 Database" as DB
+
+' === FILESYSTEM ===
+folder "~/.pixellife/" as FS
+
+' === RELATIONS ===
+
+' User interactions
+User --> UI : Contrôles simulation
+User --> Renderer : Navigation 3D
+User --> Camera : Souris/Molette
+
+' Frontend internal
+UI --> Client : Commandes (start/stop/pause)
+Client --> Controller : HTTP REST
+Renderer --> Client : Récupération données
+Renderer --> Camera : Position caméra
+
+' Backend flow
+Controller --> Service : Délégation
+Service --> Engine : Gestion simulation
+Service --> Repo : Persistance
+Engine --> Grid : Stockage entités
+Engine --> Regulator : Régulation
+Engine --> Event : Publication événements
+
+' Entity relationships
+Engine --> Org : update()
+Engine --> Plt : update()
+Engine --> Nut : update()
+
+Org --> DNA : Génétique
+Org --> Pos : Position 3D
+Plt --> Pos : Position 3D
+Nut --> Pos : Position 3D
+
+' Data flow
+Config --> Engine : Configuration initiale
+DTOs --> Renderer : Snapshots entités
+Event --> Service : Métriques temps réel
+Event --> Client : Événements
+
+' Persistence
+Repo --> DB : Simulation records
+Regulator --> FS : Paramètres appris
+
+' Cross-cutting
+Regulator -.-> Org : Bonus/malus métabolisme
+Regulator -.-> Plt : Bonus photosynthèse
+Regulator -.-> Grid : Injection entités
+
+' === NOTES ===
+note right of Regulator #lightblue
+    <b>Régulateur Homéostatique</b>
+    • Injection d'urgence (< 15%)
+    • Ajustements adaptatifs
+    • Apprentissage inter-sessions
+end note
+
+note right of Engine #lightgreen
+    <b>Moteur de Simulation</b>
+    • Cycle tick (50ms-1000ms)
+    • Mise à jour entités
+    • Nettoyage & régulation
+end note
+
+note right of Renderer #lightyellow
+    <b>Rendu 3D</b>
+    • OpenGL 3.3+
+    • LOD adaptatif
+    • 60 FPS cible
+end note
+
+note bottom of DNA #pink
+    <b>Système Génétique</b>
+    • 7 gènes (vitesse, taille, vision...)
+    • Mutation gaussienne
+    • Sélection naturelle
+end note
+
+' === LEGENDS ===
+legend right
+    |= Type |= Couleur |
+    | HTTP REST | <back:lightblue>   |
+    | WebSocket | <back:lightgreen>  |
+    | Base données | <back:lightgray> |
+    | Système fichiers | <back:lightyellow> |
+endlegend
+
+@enduml

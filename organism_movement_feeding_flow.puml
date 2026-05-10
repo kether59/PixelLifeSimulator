@@ -1,0 +1,94 @@
+@startuml Organism Movement & Feeding Decision Flow
+
+title Organism.chooseMoveTarget() & eat() - Logique de Déplacement et Alimentation
+
+start
+
+:Organism.chooseMoveTarget()
+
+:int vision = dna.visionRadius()
+:List<Entity> nearby = context.getEntitiesInRadius(position, vision)
+
+if (dna.aggression() > 0.6f ?) then (oui)
+    :Rechercher proie faible
+    var prey = nearby.stream()
+        .filter(Organism o => o != this && !o.isDead() && o.energy < energy)
+        .min(distanceTo2D)
+
+    if (prey trouvé ?) then (oui)
+        :return stepToward(prey.position)
+    endif
+endif
+
+:Rechercher nutriments proches
+var nutrient = nearby.stream()
+    .filter(Nutrient && !isDead())
+    .min(distanceTo2D)
+
+if (nutrient trouvé ?) then (oui)
+    :return stepToward(nutrient.position)
+endif
+
+:Rechercher plantes proches
+var plant = nearby.stream()
+    .filter(Plant && !isDead())
+    .min(distanceTo2D)
+
+if (plant trouvé ?) then (oui)
+    :return stepToward(plant.position)
+endif
+
+:randomNeighbor3D(context)
+note right
+    Déplacement aléatoire 3D :
+    - Direction aléatoire
+    - 10% chance monter/descendre d'1 niveau
+end note
+
+stop
+
+partition "Organism.eat() - Logique d'Alimentation" as eat {
+
+start
+
+:Organism.eat()
+
+repeat :Pour chaque entité adjacente
+    if (Nutrient && !isDead ?) then (oui)
+        :Consommer nutriment
+        gained = nutrient.richness
+        energy += gained * 0.8f  // rendement 80%
+        nutrient.die()
+        :Publier EntityAte
+        return
+    endif
+
+    if (Plant && !isDead ?) then (oui)
+        :Broutage partiel
+        bite = plant.getBiteEnergyForThis()
+        gained = min(bite, plant.energy)
+        plant.consumeEnergy(bite)
+        energy += gained * 0.8f  // rendement 80%
+        :Publier EntityAte
+        if (plant.isDead()) scheduleRemoval(plant)
+        return
+    endif
+
+    if (Organism prey && dna.aggression() > 0.7f && prey.energy < energy * 0.5f ?) then (oui)
+        :Attaque agressive
+        stolen = prey.energy * 0.25f
+        prey.consumeEnergy(stolen)
+        energy += stolen * 0.6f  // rendement 60%
+        return
+    endif
+repeat while (plus d'entités adjacentes)
+
+:Pas trouvé de nourriture
+note right : L'organisme continuera à se déplacer
+et perdra de l'énergie au métabolisme
+
+stop
+
+}
+
+@enduml

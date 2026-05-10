@@ -1,0 +1,75 @@
+@startuml PixelLife Simulation Tick Decision Flow
+
+title PixelLife - Graphe de Décision par Tick
+
+start
+
+:SimulationEngine.tick()
+increment currentStep;
+
+:Créer GridSimulationContext
+avec step, mutationRate, depth, regulator;
+
+:Obtenir snapshot de toutes les entités vivantes;
+
+repeat :Pour chaque entité dans snapshot;
+    if (entité.isDead() ?) then (non)
+        :entité.update(context);
+        note right
+            Logique spécifique selon type :
+            - Organism : move() + eat() + reproduce() + tryMerge()
+            - Plant : photosynthèse + croissance + production nutriments
+            - Nutrient : drift() + dégradation
+        end note
+    endif
+repeat while (plus d'entités ?)
+
+:cleanupDead(context);
+note right
+    Pour chaque entité morte :
+    - Supprimer de la grille
+    - Générer nutriments (Organism/Plant)
+end note
+
+if (step % 50 == 0 ?) then (oui)
+    :regulator.regulate(step, context);
+    note right
+        Régulation homéostatique :
+        1. Observer populations
+        2. Injection d'urgence si < 15%
+        3. Ajuster paramètres adaptatifs
+        4. Spawn nutriments spontanés
+    end note
+endif
+
+:context.flush();
+note right
+    Appliquer tous les ajouts/suppressions
+    en attente dans le contexte
+end note
+
+:Calculer métriques;
+note right
+    Compter organismes, plantes, nutriments
+    vivants dans la grille
+end note
+
+:Publier StepCompleted event;
+
+if (step % 100 == 0 ?) then (oui)
+    :Logger debug métriques;
+endif
+
+if (step % 1000 == 0 ?) then (oui)
+    :regulator.saveParams();
+    note right
+        Sauvegarder paramètres écosystème
+        appris dans ~/.pixellife/
+    end note
+endif
+
+:Fin du tick;
+
+stop
+
+@enduml

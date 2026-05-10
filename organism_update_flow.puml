@@ -1,0 +1,43 @@
+@startuml Organism Decision Flow
+
+title Organism.update() - Logique de Décision
+
+start
+
+:Organism.update(context)
+
+:age++
+:reproductionCooldown--
+:mergeCooldown--
+
+:move(context)
+note right : Déplacement selon stratégie
+
+:eat(context)
+note right : Recherche et consommation nourriture
+
+:tryMerge(context)
+note right : Tentative de fusion génétique
+
+:reproduce(context)
+note right : Recherche partenaire et reproduction
+
+:Consommation métabolique de base
+dna.metabolism() + context.getOrganismMetabolismPenalty()
+
+:Consommation selon taille
+(dna.size() - 0.15f) * 0.08f
+
+if (age > AGE_PENALTY_START ?) then (oui)
+    :Pénalité de vieillissement
+    0.15f * (age - AGE_PENALTY_START) / AGE_PENALTY_START
+endif
+
+if (energy <= 0 ?) then (oui)
+    :die()
+    :Publier EntityDied("starvation")
+endif
+
+stop
+
+@enduml
