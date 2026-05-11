@@ -183,7 +183,7 @@ public class SimulationRenderer {
                         .filter(e -> e.id() == selectedEntityId).findFirst()
                         .ifPresent(e -> camera.updateTrackedEntity(
                                 lerp(e.floatX(), prevPositions.get(e.id()), 0),
-                                e.floatZ() * zScale(),
+                                lerp(e.floatZ(), prevPositions.get(e.id()), 2) * zScale(),
                                 lerp(e.floatY(), prevPositions.get(e.id()), 1)));
             }
 
@@ -476,13 +476,13 @@ public class SimulationRenderer {
 
             float sx = lerp(seed.floatX(), prevPositions.get(seed.id()), 0);
             float sz = lerp(seed.floatY(), prevPositions.get(seed.id()), 1);
-            float sy = seed.z() * zScale();
+            float sy = lerp(seed.floatZ(), prevPositions.get(seed.id()), 2) * zScale();
 
             for (EntitySnapshot other : organisms) {
                 if (claimed.contains(other.id())) continue;
                 float ox = lerp(other.floatX(), prevPositions.get(other.id()), 0);
                 float oz = lerp(other.floatY(), prevPositions.get(other.id()), 1);
-                float oy = other.z() * zScale();
+                float oy = lerp(other.floatZ(), prevPositions.get(other.id()), 2) * zScale();
                 float dist = (float) Math.sqrt((sx-ox)*(sx-ox)+(sz-oz)*(sz-oz)+(sy-oy)*(sy-oy));
                 if (dist < CLUSTER_DIST) {
                     cluster.add(other);
@@ -504,7 +504,7 @@ public class SimulationRenderer {
         float   radius = e.renderRadius() > 0.05f ? e.renderRadius() : 0.30f;
         float   worldX = lerp(e.floatX(), prevPositions.get(e.id()), 0);
         float   worldZ = lerp(e.floatY(), prevPositions.get(e.id()), 1);
-        float   altY   = e.z() * zScale() + radius;
+        float   altY   = lerp(e.floatZ(), prevPositions.get(e.id()), 2) * zScale() + radius;
 
         glPushMatrix();
         glTranslatef(worldX, altY, worldZ);
@@ -539,7 +539,7 @@ public class SimulationRenderer {
             float[] prev = prevPositions.get(e.id());
             avgX += lerp(e.floatX(), prev, 0);
             avgZ += lerp(e.floatY(), prev, 1);
-            avgY += e.z() * zScale();
+            avgY += lerp(e.floatZ(), prevPositions.get(e.id()), 2) * zScale();
             float[] c = dnaColor(e);
             blended[0] += c[0]; blended[1] += c[1]; blended[2] += c[2];
             float r = e.renderRadius() > 0.05f ? e.renderRadius() : 0.30f;

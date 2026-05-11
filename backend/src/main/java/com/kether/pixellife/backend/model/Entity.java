@@ -21,13 +21,14 @@ public abstract sealed class Entity
     protected Position position;
     protected float energy;
     protected boolean alive = true;
-    protected float floatX, floatY;
+    protected float floatX, floatY, floatZ;
 
     protected Entity(Position position, float energy) {
         this.position = position;
         this.energy = energy;
         this.floatX = position.x() + 0.5f;
         this.floatY = position.y() + 0.5f;
+        this.floatZ = position.z() + 0.5f;
     }
 
     /**
@@ -57,6 +58,8 @@ public abstract sealed class Entity
         energy = 0;
     }
 
-    public int x() { return position.x(); }
-    public int y() { return position.y(); }
+    public float x() { return position.x(); }
+    public float y() { return position.y(); }
+    public float z() { return position.z(); }
+
 }

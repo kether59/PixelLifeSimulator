@@ -1,6 +1,7 @@
 package com.kether.pixellife.backend.engine;
 
 import com.kether.pixellife.backend.model.Entity;
+import com.kether.pixellife.common.model.GridCell;
 import com.kether.pixellife.common.model.Position;
 import lombok.Getter;
 
@@ -16,10 +17,8 @@ public class Grid {
     @Getter private final int width;
     @Getter private final int height;
 
-    /** Index spatial : Position -> entités présentes */
-    private final Map<Position, List<Entity>> spatialIndex = new ConcurrentHashMap<>();
-
-    /** Toutes les entités actives */
+    // Indexé par GridCell (int, int) pour la performance
+    private final Map<GridCell, List<Entity>> spatialIndex = new ConcurrentHashMap<>();
     private final Map<Long, Entity> entitiesById = new ConcurrentHashMap<>();
 
     public Grid(int width, int height) {
@@ -27,44 +26,54 @@ public class Grid {
         this.height = height;
     }
 
-    // ─── Ajout / suppression ──────────────────────────────────────────────────
+    private GridCell toCell(Position pos) {
+        return new GridCell(pos.gridX(), pos.gridY());
+    }
 
     public void addEntity(Entity entity) {
         entitiesById.put(entity.getId(), entity);
-        spatialIndex.computeIfAbsent(entity.getPosition(), _ -> new ArrayList<>())
+        spatialIndex.computeIfAbsent(toCell(entity.getPosition()), _ -> new ArrayList<>())
                 .add(entity);
     }
 
     public void removeEntity(Entity entity) {
         entitiesById.remove(entity.getId());
-        List<Entity> cell = spatialIndex.get(entity.getPosition());
+        List<Entity> cell = spatialIndex.get(toCell(entity.getPosition()));
         if (cell != null) {
             cell.remove(entity);
-            if (cell.isEmpty()) spatialIndex.remove(entity.getPosition());
+            if (cell.isEmpty()) spatialIndex.remove(toCell(entity.getPosition()));
         }
     }
 
     /**
-     * Met à jour l'index spatial après un déplacement.
-     * Appelé par les entités elles-mêmes via SimulationContext.
+     * Optimisation CRITIQUE : on ne met à jour l'index spatial QUE si
+     * l'entité a changé de case (partie entière de la position).
      */
     public void updatePosition(Entity entity, Position oldPos) {
-        List<Entity> oldCell = spatialIndex.get(oldPos);
-        if (oldCell != null) {
-            oldCell.remove(entity);
-            if (oldCell.isEmpty()) spatialIndex.remove(oldPos);
-        }
-        spatialIndex.computeIfAbsent(entity.getPosition(), _ -> new ArrayList<>())
-                .add(entity);
-    }
+        GridCell oldCell = toCell(oldPos);
+        GridCell newCell = toCell(entity.getPosition());
 
-    // ─── Requêtes spatiales ───────────────────────────────────────────────────
+        if (!oldCell.equals(newCell)) {
+            List<Entity> list = spatialIndex.get(oldCell);
+            if (list != null) {
+                list.remove(entity);
+                if (list.isEmpty()) spatialIndex.remove(oldCell);
+            }
+            spatialIndex.computeIfAbsent(newCell, _ -> new ArrayList<>()).add(entity);
+        }
+    }
 
     public List<Entity> getEntitiesAt(Position pos) {
         return Collections.unmodifiableList(
-                spatialIndex.getOrDefault(pos, Collections.emptyList())
+                spatialIndex.getOrDefault(toCell(pos), Collections.emptyList())
         );
     }
+
+    public boolean isFree(Position pos) {
+        GridCell cell = toCell(pos);
+        return !spatialIndex.containsKey(cell) || spatialIndex.get(cell).isEmpty();
+    }
+
 
     public List<Entity> getEntitiesInRadius(Position center, int radius) {
         List<Entity> result = new ArrayList<>();
@@ -80,10 +89,6 @@ public class Grid {
             }
         }
         return result;
-    }
-
-    public boolean isFree(Position pos) {
-        return !spatialIndex.containsKey(pos) || spatialIndex.get(pos).isEmpty();
     }
 
     public Optional<Position> findFreePositionNear(Position center, int maxRadius) {

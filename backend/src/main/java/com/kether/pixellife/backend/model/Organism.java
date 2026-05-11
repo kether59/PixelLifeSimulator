@@ -125,6 +125,7 @@ public final class Organism extends Entity {
                 position = target;
                 this.targetX = position.x() + 0.5f;
                 this.targetY = position.y() + 0.5f;
+                this.floatZ = position.z() + 0.5f;
                 // Synchronise la position flottante héritée d'Entity,
                 // lue par le renderer via getFloatX() / getFloatY()
                 this.floatX  = this.targetX;
@@ -169,8 +170,8 @@ public final class Organism extends Entity {
     }
 
     private Position stepToward(Position from, Position to) {
-        int dx = Integer.signum(to.x() - from.x());
-        int dy = Integer.signum(to.y() - from.y());
+        int dx = Integer.signum(to.gridX() - from.gridX());
+        int dy = Integer.signum(to.gridY() - from.gridY());
         if (Math.abs(to.x() - from.x()) >= Math.abs(to.y() - from.y())) {
             return new Position(from.x() + dx, from.y(), from.z());
         } else {
@@ -179,7 +180,7 @@ public final class Organism extends Entity {
     }
 
     /**
-     * Déplacement aléatoire en 3D — z varie d'un cran avec faible probabilité.
+     * Déplacement aléatoire en 3D — z varie de manière fluide.
      * Simule des organismes qui nagent/grimpent légèrement.
      */
     private Position randomNeighbor3D(SimulationContext context) {
@@ -187,17 +188,18 @@ public final class Organism extends Entity {
         int[] dy = {0, -1, 0, 1};
         int dir = RNG.nextInt(4);
 
-        int nx = position.x() + dx[dir];
-        int ny = position.y() + dy[dir];
+        int nx = position.gridX() + dx[dir];
+        int ny = position.gridY() + dy[dir];
 
-        // Variation verticale : 10 % de chance de monter ou descendre d'un cran
-        int nz = position.z();
+        // Variation verticale fluide : ajuste floatZ
         if (RNG.nextFloat() < 0.65f) {
-            int dz = RNG.nextBoolean() ? 1 : -1;
-            int candidate = nz + dz;
+            float dz = RNG.nextBoolean() ? 1.0f : -1.0f;
+            float candidate = floatZ + dz;
             int maxZ = context.getDepth();
-            if (candidate >= 0 && candidate < maxZ) nz = candidate;
+            if (candidate >= 0 && candidate < maxZ) floatZ = candidate;
         }
+
+        int nz = (int) floatZ;
 
         try {
             return new Position(nx, ny, nz);
@@ -317,6 +319,7 @@ public final class Organism extends Entity {
     public float getVisionRadius() { return dna.visionRadius(); }
     public float getMetabolism()   { return dna.metabolism(); }
     public float getRenderRadius() { return dna.size(); }
+    public float getFloatZ() { return floatZ; }
 
     @Override public String typeName() { return "ORGANISM"; }
 

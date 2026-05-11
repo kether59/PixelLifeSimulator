@@ -28,9 +28,9 @@ public final class Nutrient extends Entity {
             RandomGeneratorFactory.getDefault().create();
 
     // ─── Paramètres de flottaison ─────────────────────────────────────────────
-    private static final float DRIFT_SPEED     = 0.08f;   // vitesse max de dérive
-    private static final float BROWNIAN_FORCE  = 0.015f;  // perturbation aléatoire par tick
-    private static final float CURRENT_FORCE   = 0.005f;  // force du courant fictif (lent)
+    private static final float DRIFT_SPEED     = 0.12f;   // vitesse max de dérive
+    private static final float BROWNIAN_FORCE  = 0.03f;  // perturbation aléatoire par tick
+    private static final float CURRENT_FORCE   = 0.02f;  // force du courant fictif (lent)
     private static final float DRAG            = 0.92f;   // amortissement (friction)
     private static final float METABOLISM      = 0.06f;   // dégradation naturelle /tick — 5× plus vite pour éviter l'accumulation
 
@@ -72,10 +72,10 @@ public final class Nutrient extends Entity {
         vy += (RNG.nextFloat() - 0.5f) * BROWNIAN_FORCE;
 
         // Courant fictif : variation lente de Z (monte/descend occasionnellement)
-        if (RNG.nextFloat() < 0.02f) {  // 2% de chance par tick de changer de direction Z
-            vz += (RNG.nextFloat() - 0.5f) * CURRENT_FORCE * 2;
+        if (RNG.nextFloat() < 0.05f) {  // 5% de chance par tick de changer de direction Z
+            vz += (RNG.nextFloat() - 0.5f) * CURRENT_FORCE * 4;
         } else {
-            vz += (RNG.nextFloat() - 0.5f) * CURRENT_FORCE * 0.1f;  // variation très lente sinon
+            vz += (RNG.nextFloat() - 0.5f) * CURRENT_FORCE * 0.2f;  // variation très lente sinon
         }
 
         // Amortissement (drag fluide) — X, Y et Z

@@ -13,7 +13,12 @@ package com.kether.pixellife.common.model;
  * (cells indexées par (x,y) uniquement) — z est une propriété d'affichage
  * qui peut évoluer librement sans impacter le moteur de collision.
  */
-public record Position(int x, int y, int z) {
+public record Position(float x, float y, float z) {
+
+    /** Coordonnées de la cellule de grille correspondante. */
+    public int gridX() { return (int) Math.floor(x); }
+    public int gridY() { return (int) Math.floor(y); }
+    public int gridZ() { return (int) Math.floor(z); }
 
     public Position {
         if (x < 0 || y < 0 || z < 0)
@@ -21,37 +26,37 @@ public record Position(int x, int y, int z) {
     }
 
     /** Constructeur 2D de compatibilité — z = 0. */
-    public Position(int x, int y) {
-        this(x, y, 0);
+    public Position(float x, float y) {
+        this(x, y, 0.0f);
     }
 
-    public Position translate(int dx, int dy) {
+    public Position translate(float dx, float dy) {
         return new Position(x + dx, y + dy, z);
     }
 
-    public Position translate(int dx, int dy, int dz) {
+    public Position translate(float dx, float dy, float dz) {
         return new Position(x + dx, y + dy, z + dz);
     }
 
     public double distanceTo(Position other) {
-        int dx = this.x - other.x;
-        int dy = this.y - other.y;
-        int dz = this.z - other.z;
+        float dx = this.x - other.x;
+        float dy = this.y - other.y;
+        float dz = this.z - other.z;
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     /** Distance 2D (x,y) — pour la logique de collision/vision qui reste planaire. */
     public double distanceTo2D(Position other) {
-        int dx = this.x - other.x;
-        int dy = this.y - other.y;
+        float dx = this.x - other.x;
+        float dy = this.y - other.y;
         return Math.sqrt(dx * dx + dy * dy);
     }
 
-    public boolean isWithinBounds(int width, int height) {
+    public boolean isWithinBounds(float width, float height) {
         return x >= 0 && x < width && y >= 0 && y < height && z >= 0;
     }
 
-    public boolean isWithinBounds(int width, int height, int depth) {
+    public boolean isWithinBounds(float width, float height, float depth) {
         return x >= 0 && x < width && y >= 0 && y < height && z >= 0 && z < depth;
     }
 

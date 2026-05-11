@@ -237,9 +237,9 @@ public class SimulationService {
         float   renderHeight = 0f;
 
         // Position continue par défaut : centre de la cellule
-        float fx = entity.x() + 0.5f;
-        float fy = entity.y() + 0.5f;
-        float fz = entity.getPosition().z() + 0.5f;
+        float fx = entity.x();
+        float fy = entity.y();
+        float fz = entity.z();
 
         if (entity instanceof Organism o) {
             gender       = o.getGender().name();
@@ -266,9 +266,9 @@ public class SimulationService {
         return new EntitySnapshot(
                 entity.getId(),
                 entity.typeName(),
-                entity.x(),
-                entity.y(),
-                entity.getPosition().z(),
+                entity.getPosition().gridX(),
+                entity.getPosition().gridY(),
+                entity.getPosition().gridZ(),
                 fx, fy, fz,               // position continue
                 entity.getEnergy(),
                 gender,
