@@ -1,89 +1,123 @@
 package com.kether.pixellife.backend.model;
 
+import com.kether.pixellife.backend.constant.GameConstants;
 import com.kether.pixellife.backend.engine.SimulationContext;
+import com.kether.pixellife.common.model.BiologicalConfig;
 import com.kether.pixellife.common.model.Position;
 import lombok.Getter;
+import lombok.Setter;
 
 import java.util.random.RandomGenerator;
 import java.util.random.RandomGeneratorFactory;
 
 /**
- * Plante avec croissance progressive en hauteur.
+ * Plante — producteur primaire de l'écosystème.
+ *
+ * <p>Cycle de vie par tick :</p>
+ * <ol>
+ *   <li><b>Photosynthèse</b> — gain proportionnel à la hauteur, au génome et au bonus adaptatif.</li>
+ *   <li><b>Croissance</b> — monte vers {@code BiologicalConfig.plantMaxHeight}.</li>
+ *   <li><b>Production de nutriments</b> — spawn spontané si énergie > 50 %.</li>
+ *   <li><b>Reproduction</b> — spawn d'une plante fille à ±4 cases si énergie > 60 %.</li>
+ *   <li><b>Métabolisme</b> — coût de maintenance par tick.</li>
+ * </ol>
+ *
+ * <p>Tous les seuils biologiques sont lus depuis {@link BiologicalConfig} à chaque tick,
+ * ce qui permet une configuration à chaud sans recompilation.</p>
  */
 @Getter
+@Setter
 public final class Plant extends Entity {
 
-    private static final RandomGenerator RNG =
-            RandomGeneratorFactory.getDefault().create();
+    private static final RandomGenerator RNG = RandomGeneratorFactory.getDefault().create();
 
-    // Paramètres biologiques
-    private static final float ENERGY_MAX       = 200f;
-    private static final float METABOLISM       = 0.05f;
-    private static final float MAX_HEIGHT       = 16.0f;  // augmenté pour 16 niveaux
-    private static final float GROWTH_SPEED     = 0.005f; // accéléré de 0.002f à 0.005f
-
-    // Robustesse proportionnelle à la taille
-    static final float BASE_BITE        = 10f;
-    static final float ROBUSTNESS_FACTOR= 0.15f;
-
+    /** Taux de croissance intrinsèque — déterminé à la naissance, invariant. */
     private final float growthRate;
-    private float height = 0.0f;      // hauteur actuelle (instance variable, pas static)
+
+    /** Hauteur actuelle en niveaux Z (0.0 → {@code plantMaxHeight}). */
+    private float height = 0.0f;
 
     public Plant(Position position, float energy, float growthRate) {
         super(position, energy);
         this.growthRate = growthRate;
     }
 
+    // ─── Cycle de vie ─────────────────────────────────────────────────────────
+
     @Override
     public void update(SimulationContext context) {
-        // Photosynthèse proportionnelle à la hauteur
-        float photosynthesisFactor = 1.0f + height / MAX_HEIGHT;
-        float bonus = context.getPlantPhotosynthesisBonus();
-        float gain = (0.20f + bonus) * growthRate * photosynthesisFactor;
-        energy = Math.min(energy + gain, ENERGY_MAX);
+        BiologicalConfig bio = context.getBiologicalConfig();
 
-        // Croissance en hauteur avec vitesse aléatoire entre 50 et 300 ticks par étage
-        if (energy > ENERGY_MAX * 0.3f && height < MAX_HEIGHT) {
-            float growthSpeedFactor = 1.0f / RNG.nextInt(50, 300);
-            height = Math.min(height + GROWTH_SPEED * growthRate * energy / ENERGY_MAX * growthSpeedFactor, MAX_HEIGHT);
-
-            // Mise à jour de la position Z
-            int newZ = (int) height;
-            if (newZ != position.z()) {
-                Position oldPos = position;
-                position = new Position(position.x(), position.y(), newZ);
-                context.updateEntityPosition(this, oldPos);
-            }
-        }
-
-        // Production de nutriments
-        if (energy > ENERGY_MAX * 0.5f && RNG.nextFloat() < growthRate * 0.05f) {
-            float richness = 5f + RNG.nextFloat() * 10f;
-            context.spawnNutrientNear(position, richness);
-        }
-
-        // Reproduction au niveau du sol
-        if (energy > ENERGY_MAX * 0.6f && RNG.nextFloat() < 0.008f * growthRate) {
-            Position groundPos = new Position(position.x(), position.y(), 0);
-            context.findFreePositionNear(groundPos, 4).ifPresent(newPos -> {
-                context.spawnPlantNear(newPos);
-                energy -= ENERGY_MAX * 0.15f;
-            });
-        }
-
-        consumeEnergy(METABOLISM);
+        photosynthesise(context, bio);
+        grow(context, bio);
+        maybeSpawnNutrient(context, bio);
+        maybeReproduce(context, bio);
+        consumeEnergy(bio.plantMetabolism());
     }
 
-    public float getBiteEnergyForThis() {
-        return BASE_BITE / (1f + height * ROBUSTNESS_FACTOR);
+    private void photosynthesise(SimulationContext context, BiologicalConfig bio) {
+        float heightFactor = 1f + height / bio.plantMaxHeight();
+        float gain = (bio.plantPhotosynthesisBase() + context.getPlantPhotosynthesisBonus())
+                * growthRate * heightFactor;
+        energy = Math.min(energy + gain, bio.plantEnergyMax());
     }
 
+    private void grow(SimulationContext context, BiologicalConfig bio) {
+        if (energy <= bio.plantEnergyMax() * GameConstants.PLANT_GROW_ENERGY_THRESHOLD) return;
+        if (height >= bio.plantMaxHeight()) return;
+
+        height += growthRate * GameConstants.PLANT_GROW_RATE_FACTOR * (energy / bio.plantEnergyMax());
+        height  = Math.min(height, bio.plantMaxHeight());
+
+        int newZ = (int) height;
+        if (newZ != position.z()) {
+            Position oldPos = position;
+            position = new Position(position.x(), position.y(), newZ);
+            context.updateEntityPosition(this, oldPos);
+        }
+    }
+
+    private void maybeSpawnNutrient(SimulationContext context, BiologicalConfig bio) {
+        if (energy > bio.plantEnergyMax() * GameConstants.PLANT_NUTRIENT_SPAWN_THRESHOLD
+                && RNG.nextFloat() < growthRate * GameConstants.PLANT_NUTRIENT_SPAWN_CHANCE) {
+            context.spawnNutrientNear(position, 5f + RNG.nextFloat() * 10f);
+        }
+    }
+
+    private void maybeReproduce(SimulationContext context, BiologicalConfig bio) {
+        if (energy <= bio.plantEnergyMax() * GameConstants.PLANT_REPRO_ENERGY_THRESHOLD) return;
+        if (RNG.nextFloat() >= GameConstants.PLANT_REPRO_BASE_CHANCE * growthRate) return;
+
+        Position groundPos = new Position(position.x(), position.y(), 0);
+        context.findFreePositionNear(groundPos, 4).ifPresent(newPos -> {
+            context.spawnPlantNear(newPos);
+            energy -= bio.plantEnergyMax() * GameConstants.PLANT_REPRO_ENERGY_COST;
+        });
+    }
+
+    // ─── Calculs de rendu et de combat ────────────────────────────────────────
+
+    /**
+     * Énergie prélevée par une morsure — réduite par la robustesse liée à la hauteur.
+     *
+     * <p>Protection = 1 + hauteur × robustnessFactor.<br>
+     * À la hauteur max, la plante reçoit au minimum {@code PLANT_MIN_BITE_ENERGY}.</p>
+     *
+     * @param bio configuration biologique de la simulation courante
+     */
+    public float getBiteEnergyForThis(BiologicalConfig bio) {
+        float protection = 1f + height * bio.plantRobustnessFactor();
+        return Math.max(GameConstants.PLANT_MIN_BITE_ENERGY, bio.plantBaseBite() / protection);
+    }
+
+    /** Hauteur normalisée [0, 1] par rapport à {@code PLANT_MAX_HEIGHT} pour le rendu. */
     public float getRenderHeight() {
-        return height / MAX_HEIGHT;
+        return height / GameConstants.PLANT_MAX_HEIGHT;
     }
 
+    /** Rayon de rendu proportionnel à la maturité. */
     public float getRenderRadius() {
-        return 0.30f + (height / MAX_HEIGHT) * 0.12f;
+        return 0.30f + getRenderHeight() * 0.12f;
     }
 
     @Override public String typeName() { return "PLANT"; }

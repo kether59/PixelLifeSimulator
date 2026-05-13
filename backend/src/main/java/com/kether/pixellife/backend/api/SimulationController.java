@@ -1,6 +1,6 @@
 package com.kether.pixellife.backend.api;
 
-import com.kether.pixellife.backend.constant.Constant;
+import com.kether.pixellife.backend.constant.GameConstants;
 import com.kether.pixellife.backend.service.SimulationService;
 import com.kether.pixellife.common.dto.SimulationDtos;
 import com.kether.pixellife.common.model.SimulationConfig;
@@ -78,7 +78,7 @@ public class SimulationController {
     public ResponseEntity<Map<String, String>> pause(@PathVariable long id) {
         boolean ok = simulationService.pauseSimulation(id);
         return ok
-                ? ResponseEntity.ok(Map.of(Constant.STATUS, "paused"))
+                ? ResponseEntity.ok(Map.of(GameConstants.KEY_STATUS, "paused"))
                 : ResponseEntity.notFound().build();
     }
 
@@ -86,7 +86,7 @@ public class SimulationController {
     public ResponseEntity<Map<String, String>> resume(@PathVariable long id) {
         boolean ok = simulationService.resumeSimulation(id);
         return ok
-                ? ResponseEntity.ok(Map.of(Constant.STATUS, "running"))
+                ? ResponseEntity.ok(Map.of(GameConstants.KEY_STATUS, "running"))
                 : ResponseEntity.notFound().build();
     }
 
@@ -94,7 +94,7 @@ public class SimulationController {
     public ResponseEntity<Map<String, String>> stop(@PathVariable long id) {
         boolean ok = simulationService.stopSimulation(id);
         return ok
-                ? ResponseEntity.ok(Map.of(Constant.STATUS, "stopped"))
+                ? ResponseEntity.ok(Map.of(GameConstants.KEY_STATUS, "stopped"))
                 : ResponseEntity.notFound().build();
     }
 
@@ -110,11 +110,11 @@ public class SimulationController {
             @RequestParam long delayMs) {
         if (delayMs < 0) {
             return ResponseEntity.badRequest()
-                    .body(Map.of(Constant.ERROR, "delayMs doit être >= 0"));
+                    .body(Map.of(GameConstants.KEY_ERROR, "delayMs doit être >= 0"));
         }
         boolean ok = simulationService.setTickDelay(id, delayMs);
         return ok
-                ? ResponseEntity.ok(Map.of(Constant.SIMULATION_ID, id, Constant.TICK_DELAY_MS, delayMs))
+                ? ResponseEntity.ok(Map.of(GameConstants.KEY_SIMULATION_ID, id, GameConstants.KEY_TICK_DELAY_MS, delayMs))
                 : ResponseEntity.notFound().build();
     }
 }

@@ -3,7 +3,6 @@ package com.kether.pixellife.frontend.render;
 import com.kether.pixellife.common.dto.SimulationDtos.EntitySnapshot;
 import com.kether.pixellife.common.dto.SimulationDtos.GridSnapshot;
 import com.kether.pixellife.common.model.DNA;
-import com.kether.pixellife.common.model.Gender;
 import com.kether.pixellife.frontend.client.BackendClient;
 import com.kether.pixellife.frontend.ui.ControlPanel;
 import lombok.Setter;
@@ -227,7 +226,10 @@ public class SimulationRenderer {
     private void renderGround() {
         glDisable(GL_LIGHTING);
         glColor3f(C_GROUND[0], C_GROUND[1], C_GROUND[2]);
-        MeshBuilder.drawGroundPlane(gridWidth, gridHeight);
+
+        // Dessiner le terrain avec variation de hauteur
+        MeshBuilder.drawTerrainGround(gridWidth, gridHeight, gridDepth);
+
         if (camera.getDistance() < 150f && gridWidth <= 120) {
             glColor4f(C_GRID[0], C_GRID[1], C_GRID[2], 0.7f);
             MeshBuilder.drawGroundGrid(gridWidth, gridHeight);
@@ -296,17 +298,25 @@ public class SimulationRenderer {
 
         switch (e.type()) {
 
-            // ── PLANTE ────────────────────────────────────────────────────────
+            // ── PLANTE ────────────────────────────────────────────────────
             case "PLANT" -> {
                 float renderH = e.renderHeight();
                 float radius  = e.renderRadius() > 0.05f ? e.renderRadius() : 0.30f;
 
-                float targetHeight = Math.max(1.0f, e.z() * zScale());
-                float cylH = targetHeight * renderH;
-
+                // Hauteur du cylindre : varie de 0.4 à 3.5 unités selon la croissance
+                float minCylHeight = 0.4f;
+                float maxCylHeight = gridDepth * zScale();
+                float cylH = minCylHeight + renderH * (maxCylHeight - minCylHeight);
 
                 float[] color = lerpColor(C_PLANT_YOUNG, C_PLANT_OLD, renderH);
 
+                // Random style based on ID for variety
+                int style = (int) (e.id() % 4);
+                switch (style) {
+                    case 1 -> radius *= 1.5f; // wider
+                    case 2 -> cylH *= 0.7f;   // shorter
+                    case 3 -> color[1] += 0.1f; // more green
+                }
 
                 float worldX = e.x() + 0.5f;
                 float worldZ = e.y() + 0.5f;
@@ -333,7 +343,7 @@ public class SimulationRenderer {
                 float size = 0.12f + (Math.min(e.energy(), 20f) / 20f) * 0.12f;
 
                 glColor3f(C_NUTRIENT[0], C_NUTRIENT[1], C_NUTRIENT[2]);
-                MeshBuilder.drawOctahedron(size);
+                MeshBuilder.drawCube(size);
             }
         }
 
@@ -342,15 +352,67 @@ public class SimulationRenderer {
 
     // ─── Couleur ADN ─────────────────────────────────────────────────────────
 
+    /**
+     * Génère une couleur basée sur le sexe et le régime alimentaire.
+     *
+     * Sexe :
+     *  - FEMELLE : nuances de rose/magenta
+     *  - MÂLE : nuances de bleu
+     *
+     * Régime alimentaire :
+     *  - Omnivore (0) : couleur de base
+     *  - Herbivore (1) : tinte verte supplémentaire
+     *  - Carnivore (2) : tinte rouge supplémentaire
+     *  - Cannibal (3) : version assombrie (darkened)
+     */
     private float[] dnaColor(EntitySnapshot e) {
-        if (e.dna() != null && e.dna().length >= 7) {
-            DNA    dna    = DNA.fromArray(e.dna());
-            Gender gender = "FEMALE".equals(e.gender()) ? Gender.FEMALE : Gender.MALE;
-            return dna.toColor(gender);
+        float[] color;
+        int diet = 0;
+
+        // Extraire le régime alimentaire du DNA (indice 7)
+        if (e.dna() != null && e.dna().length >= 8) {
+            diet = (int) e.dna()[7];
         }
-        return "FEMALE".equals(e.gender())
-                ? new float[]{1.00f, 0.40f, 0.70f}
-                : new float[]{0.30f, 0.60f, 1.00f};
+
+        boolean isFemale = "FEMALE".equals(e.gender());
+
+        // Couleur de base selon le sexe
+        if (isFemale) {
+            // Femelle : rose/magenta et ses variantes
+            color = new float[]{0.95f, 0.35f, 0.75f};  // Rose vif de base
+        } else {
+            // Mâle : bleu et ses variantes
+            color = new float[]{0.35f, 0.65f, 0.98f};  // Bleu vif de base
+        }
+
+        // Application des variantes de régime alimentaire
+        switch (diet) {
+            case 1 -> {
+                // Herbivore : accentuer le vert
+                color[1] = Math.min(1.0f, color[1] + 0.35f);  // Augmenter le vert
+                if (!isFemale) color[2] = Math.max(0.0f, color[2] - 0.2f);  // Bleu → cyan
+            }
+            case 2 -> {
+                // Carnivore : accentuer le rouge
+                color[0] = Math.min(1.0f, color[0] + 0.35f);  // Augmenter le rouge
+                if (isFemale) color[2] = Math.max(0.0f, color[2] - 0.15f);  // Rose → magenta rouge
+            }
+            case 3 -> {
+                // Cannibal : assombrir significativement
+                color[0] = Math.max(0.0f, color[0] - 0.30f);
+                color[1] = Math.max(0.0f, color[1] - 0.30f);
+                color[2] = Math.max(0.0f, color[2] - 0.30f);
+                // Garder une teinte selon le sexe mais foncée
+                if (isFemale) {
+                    color[0] = Math.max(0.15f, color[0]);  // Rester un peu rosé/mauve foncé
+                } else {
+                    color[2] = Math.max(0.15f, color[2]);  // Rester un peu bleu foncé
+                }
+            }
+            // case 0 : omnivore → couleur de base sans modification
+        }
+
+        return color;
     }
 
     /** Interpolation linéaire entre deux couleurs RGB. */
@@ -504,10 +566,18 @@ public class SimulationRenderer {
         float   radius = e.renderRadius() > 0.05f ? e.renderRadius() : 0.30f;
         float   worldX = lerp(e.floatX(), prevPositions.get(e.id()), 0);
         float   worldZ = lerp(e.floatY(), prevPositions.get(e.id()), 1);
-        float   altY   = lerp(e.floatZ(), prevPositions.get(e.id()), 2) * zScale() + radius;
+        DNA dna = DNA.fromArray(e.dna());
+        float scaleY = 0.7f - (dna != null ? dna.metabolism() * 0.1f : 0f);
+        float   altY   = lerp(e.floatZ(), prevPositions.get(e.id()), 2) * zScale() + radius * scaleY;
 
         glPushMatrix();
         glTranslatef(worldX, altY, worldZ);
+
+        // Slime scaling linked to DNA
+        float scaleX = 1.2f + (dna != null ? dna.speed() * 0.1f : 0f);
+        scaleY = 0.7f - (dna != null ? dna.metabolism() * 0.1f : 0f);
+        float scaleZ = 1.2f + (dna != null ? dna.visionRadius() * 0.05f : 0f);
+        glScalef(scaleX, scaleY, scaleZ);
 
         if (e.id() == selectedEntityId) {
             glDisable(GL_LIGHTING);
@@ -553,10 +623,13 @@ public class SimulationRenderer {
 
         // Le blob grossit avec le nombre de membres
         float coreR  = maxR * (1f + 0.28f * Math.min(n - 1, 5));
-        float altY   = avgY + coreR;
+        float altY   = avgY + coreR * 0.8f;
 
         glPushMatrix();
         glTranslatef(avgX, altY, avgZ);
+
+        // Slime scaling for clusters
+        glScalef(1.2f, 0.8f, 1.2f);
 
         // Halo de sélection
         if (hasSelected) {

@@ -1,37 +1,82 @@
 package com.kether.pixellife.common.model;
 
 /**
- * Configuration immuable d'une simulation — v3.
+ * Configuration immuable d'une simulation.
  *
- * Changements :
- *  - plantRatio/nutrientRatio/organismRatio → plantCount/nutrientCount/organismCount (valeurs absolues)
- *  - maxSteps = 0  →  simulation infinie
- *  - mutationRate pour l'évolution génétique
+ * <p>Deux niveaux de configuration :</p>
+ * <ul>
+ *   <li><b>Structurel</b> — grille, populations initiales, durée, graine, taux de mutation.</li>
+ *   <li><b>Biologique</b> — {@link BiologicalConfig} : règles biologiques ajustables à chaud
+ *       (énergie, métabolisme, vitesse, etc.). {@code null} = utilisation des défauts.</li>
+ * </ul>
+ *
+ * <p>{@code maxSteps = 0} → simulation infinie.</p>
+ *
+ * @see BiologicalConfig
+ * @see SimulationPreset
  */
 public record SimulationConfig(
-        int   width,
-        int   height,
-        int   plantCount,       // nombre initial de plantes
-        int   nutrientCount,    // nombre initial de nutriments
-        int   organismCount,    // nombre initial d'organismes
-        int   maxSteps,         // 0 = infini
-        long  seed,
-        float mutationRate      // 0.01 – 0.20, défaut 0.05
+        int              width,
+        int              height,
+        int              plantCount,
+        int              nutrientCount,
+        int              organismCount,
+        int              maxSteps,
+        long             seed,
+        float            mutationRate,
+        BiologicalConfig biologicalConfig   // null → BiologicalConfig.defaults()
 ) {
     public SimulationConfig {
-        if (width        <= 0)                   throw new IllegalArgumentException("Dimensions invalides");
-        if (height       <= 0)                   throw new IllegalArgumentException("Dimensions invalides");
-        if (plantCount    < 0)                   throw new IllegalArgumentException("plantCount < 0");
-        if (nutrientCount < 0)                   throw new IllegalArgumentException("nutrientCount < 0");
-        if (organismCount < 0)                   throw new IllegalArgumentException("organismCount < 0");
-        if (maxSteps      < 0)                   throw new IllegalArgumentException("maxSteps < 0");
+        if (width         <= 0)                    throw new IllegalArgumentException("Dimensions invalides");
+        if (height        <= 0)                    throw new IllegalArgumentException("Dimensions invalides");
+        if (plantCount    <  0)                    throw new IllegalArgumentException("plantCount < 0");
+        if (nutrientCount <  0)                    throw new IllegalArgumentException("nutrientCount < 0");
+        if (organismCount <  0)                    throw new IllegalArgumentException("organismCount < 0");
+        if (maxSteps      <  0)                    throw new IllegalArgumentException("maxSteps < 0");
         if (mutationRate  < 0 || mutationRate > 1) throw new IllegalArgumentException("mutationRate hors [0,1]");
     }
 
-    /** Constructeur sans mutationRate — rétro-compatibilité. */
+    // ─── Constructeurs de compatibilité ───────────────────────────────────────
+
+    /** Constructeur sans biologicalConfig (utilise les défauts). */
+    public SimulationConfig(int width, int height, int plantCount, int nutrientCount,
+                            int organismCount, int maxSteps, long seed, float mutationRate) {
+        this(width, height, plantCount, nutrientCount, organismCount, maxSteps, seed, mutationRate, null);
+    }
+
+    /** Constructeur sans biologicalConfig ni mutationRate. */
     public SimulationConfig(int width, int height, int plantCount, int nutrientCount,
                             int organismCount, int maxSteps, long seed) {
-        this(width, height, plantCount, nutrientCount, organismCount, maxSteps, seed, 0.05f);
+        this(width, height, plantCount, nutrientCount, organismCount, maxSteps, seed, 0.05f, null);
+    }
+
+    // ─── API ──────────────────────────────────────────────────────────────────
+
+    /**
+     * Retourne la configuration biologique effective.
+     * Si {@code biologicalConfig} est {@code null} (simulations existantes, appel sans config),
+     * retourne {@link BiologicalConfig#defaults()}.
+     */
+    public BiologicalConfig effectiveBioConfig() {
+        return biologicalConfig != null ? biologicalConfig : BiologicalConfig.defaults();
+    }
+
+    /** Simulation infinie si maxSteps == 0. */
+    public boolean isInfinite() { return maxSteps == 0; }
+
+    public int totalCells() { return width * height; }
+
+    // Accesseurs de compatibilité (ratios calculés à la demande)
+    public float plantRatio()    { return (float) plantCount    / Math.max(totalCells(), 1); }
+    public float nutrientRatio() { return (float) nutrientCount / Math.max(totalCells(), 1); }
+    public float organismRatio() { return (float) organismCount / Math.max(totalCells(), 1); }
+
+    // ─── Factories ────────────────────────────────────────────────────────────
+
+    /** Configuration équilibrée par défaut — cycle stable plantes ↔ organismes. */
+    public static SimulationConfig defaults() {
+        return new SimulationConfig(80, 80, 600, 300, 40, 0,
+                System.currentTimeMillis(), 0.05f, null);
     }
 
     /** Migration depuis l'ancienne API à ratios. */
@@ -41,33 +86,7 @@ public record SimulationConfig(
         int total = width * height;
         return new SimulationConfig(
                 width, height,
-                (int)(total * plantRatio),
-                (int)(total * nutrientRatio),
-                (int)(total * organismRatio),
-                maxSteps, seed, 0.05f
-        );
+                (int)(total * plantRatio), (int)(total * nutrientRatio), (int)(total * organismRatio),
+                maxSteps, seed, 0.05f, null);
     }
-
-    /** Config par défaut équilibrée — cycle stable plantes ↔ organismes. */
-    public static SimulationConfig defaults() {
-        return new SimulationConfig(
-                80, 80,
-                600,    // plantes
-                300,    // nutriments
-                40,     // organismes (peu = départ lent mais plus stable)
-                0,      // infini
-                System.currentTimeMillis(),
-                0.05f
-        );
-    }
-
-    /** true si la simulation tourne sans limite de steps. */
-    public boolean isInfinite() { return maxSteps == 0; }
-
-    public int totalCells() { return width * height; }
-
-    // Accesseurs de compatibilité (ratios calculés)
-    public float plantRatio()    { return (float) plantCount    / Math.max(totalCells(), 1); }
-    public float nutrientRatio() { return (float) nutrientCount / Math.max(totalCells(), 1); }
-    public float organismRatio() { return (float) organismCount / Math.max(totalCells(), 1); }
 }

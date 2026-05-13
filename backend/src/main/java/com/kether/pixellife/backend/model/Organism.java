@@ -1,10 +1,12 @@
 package com.kether.pixellife.backend.model;
 
+import com.kether.pixellife.backend.constant.GameConstants;
+import com.kether.pixellife.backend.engine.SimulationContext;
+import com.kether.pixellife.common.event.SimulationEvent;
+import com.kether.pixellife.common.model.BiologicalConfig;
 import com.kether.pixellife.common.model.DNA;
 import com.kether.pixellife.common.model.Gender;
 import com.kether.pixellife.common.model.Position;
-import com.kether.pixellife.backend.engine.SimulationContext;
-import com.kether.pixellife.common.event.SimulationEvent;
 import lombok.Getter;
 
 import java.time.Instant;
@@ -14,47 +16,34 @@ import java.util.random.RandomGenerator;
 import java.util.random.RandomGeneratorFactory;
 
 /**
- * Organisme vivant — v3.
+ * Organisme vivant — consommateur mobile de l'écosystème.
  *
- * Rééquilibrage du cycle de vie :
- *  - ENERGY_MAX réduite à 120 (était 200) → moins de "réserve tampon"
- *  - Énergie de départ réduite à 30 (était 50)
- *  - Métabolisme de base du génome plus élevé par défaut (0.8 au lieu de 0.5)
- *  - Coût de reproduction augmenté : 30 énergie (était 20)
- *  - Seuil de reproduction relevé à 70 énergie (était 60)
- *  - Cooldown de reproduction allongé : 50 ticks (était 30)
- *  - Broutage des plantes : l'organisme ne prend que BITE_ENERGY par tick
- *    (la plante ne meurt pas d'un seul coup)
- *  - Vieillissement plus agressif après 150 ticks (était 200)
- *  - Déplacement 3D : z peut varier légèrement (organismes "nageurs/grimpeurs")
+ * <p>Le comportement (vitesse, vision, régime, agressivité) est entièrement
+ * codé dans le {@link DNA}. Les seuils biologiques (énergie, coûts, âge)
+ * sont lus depuis {@link BiologicalConfig} à chaque tick.</p>
  *
- * DNA intégré : tous les traits phénotypiques passent par le génome.
+ * <h3>Cycle de vie par tick</h3>
+ * <ol>
+ *   <li>Vieillissement — mort garantie à {@code organismMaxAge}</li>
+ *   <li>Déplacement — vers proie / nutriment / plante / aléatoire</li>
+ *   <li>Alimentation — nutriment > plante > vol sur organisme affaibli</li>
+ *   <li>Fusion — si génomes proches et assez d'énergie</li>
+ *   <li>Reproduction — sexuée avec partenaire à portée</li>
+ *   <li>Dépenses — métabolisme, taille, solitude, vieillissement</li>
+ * </ol>
  */
 @Getter
 public final class Organism extends Entity {
 
-    private static final RandomGenerator RNG =
-            RandomGeneratorFactory.getDefault().create();
+    private static final RandomGenerator RNG = RandomGeneratorFactory.getDefault().create();
 
-    // ─── Constantes biologiques ───────────────────────────────────────────────
-    private static final float ENERGY_MAX           = 120f;  // réduit de 200 → 120
-    public static final float ENERGY_START         = 30f;   // réduit de 50 → 30
-    private static final float REPRO_COST           = 30f;   // augmenté de 20 → 30
-    private static final float REPRO_COOLDOWN_TICKS = 50;    // augmenté de 30 → 50
-    private static final float AGE_PENALTY_START    = 150;   // réduit de 200 → 150
-    private static final float MERGE_THRESHOLD      = 0.35f;
-    private static final float MAX_MERGED_ENERGY    = 100f;
-    private static final float DEFAULT_MUTATION_RATE = 0.05f;
-
-    // ─── Identité génétique ───────────────────────────────────────────────────
     private final DNA    dna;
     private final Gender gender;
     private final int    generation;
 
-    // ─── État ────────────────────────────────────────────────────────────────
-    private int reproductionCooldown = 0;
-    private int mergeCooldown        = 0;
-    private int age                  = 0;
+    private int   reproductionCooldown = 0;
+    private int   mergeCooldown        = 0;
+    private int   age                  = 0;
     private float targetX, targetY;
 
     public Organism(Position position, float energy, Gender gender, int generation, DNA dna) {
@@ -62,51 +51,58 @@ public final class Organism extends Entity {
         this.gender     = gender;
         this.generation = generation;
         this.dna        = dna;
-        this.targetX = getFloatX();
-        this.targetY = getFloatY();
+        this.targetX    = getFloatX();
+        this.targetY    = getFloatY();
     }
 
     // ─── Factories ────────────────────────────────────────────────────────────
 
-    public static Organism spawn(Position position) {
+    /**
+     * Crée un organisme avec ADN aléatoire muté et l'énergie de départ configurée.
+     *
+     * @param position    position initiale
+     * @param startEnergy énergie de départ (issue de {@link BiologicalConfig#organismEnergyStart()})
+     */
+    public static Organism spawn(Position position, float startEnergy) {
         DNA dna = DNA.defaults().mutate(0.15f, RNG);
-        return new Organism(position, ENERGY_START, Gender.random(), 0, dna);
+        return new Organism(position, startEnergy, Gender.random(), 0, dna);
     }
 
-    public static Organism offspring(Organism a, Organism b, Position position, float mutationRate) {
+    /**
+     * Crée un enfant par croisement des génomes parentaux puis mutation.
+     *
+     * @param a, b         parents
+     * @param position     position de naissance
+     * @param mutationRate taux de mutation (depuis SimulationConfig)
+     * @param startEnergy  énergie de départ (depuis BiologicalConfig)
+     */
+    public static Organism offspring(Organism a, Organism b, Position position,
+                                     float mutationRate, float startEnergy) {
         DNA childDna = DNA.crossover(a.dna, b.dna, RNG).mutate(mutationRate, RNG);
-        return new Organism(position, ENERGY_START * 0.8f, Gender.random(),
+        return new Organism(position, startEnergy * 0.8f, Gender.random(),
                 Math.max(a.generation, b.generation) + 1, childDna);
-    }
-
-    public static Organism offspring(Organism a, Organism b, Position position) {
-        return offspring(a, b, position, DEFAULT_MUTATION_RATE);
     }
 
     // ─── Cycle de vie ─────────────────────────────────────────────────────────
 
     @Override
     public void update(SimulationContext context) {
+        BiologicalConfig bio = context.getBiologicalConfig();
         age++;
         if (reproductionCooldown > 0) reproductionCooldown--;
-        if (mergeCooldown > 0) mergeCooldown--;
+        if (mergeCooldown        > 0) mergeCooldown--;
+
+        if (age >= bio.organismMaxAge()) {
+            die();
+            context.publishEvent(new SimulationEvent.EntityDied(id, position, "old_age", Instant.now()));
+            return;
+        }
 
         move(context);
-        eat(context);
-        tryMerge(context);
-        reproduce(context);
-
-        // Coût métabolique de base (génome) + pénalité adaptative du régulateur
-        // La pénalité augmente doucement si les organismes surpeuplent l'écosystème
-        consumeEnergy(dna.metabolism() + context.getOrganismMetabolismPenalty());
-
-        // Coût de la taille (les grands organismes coûtent plus cher)
-        consumeEnergy((dna.size() - 0.15f) * 0.08f);
-
-        // Vieillissement accéléré après AGE_PENALTY_START ticks
-        if (age > AGE_PENALTY_START) {
-            consumeEnergy(0.15f * (age - AGE_PENALTY_START) / AGE_PENALTY_START);
-        }
+        eat(context, bio);
+        tryMerge(context, bio);
+        reproduce(context, bio);
+        payEnergyCosts(context, bio);
 
         if (isDead()) {
             context.publishEvent(new SimulationEvent.EntityDied(
@@ -114,7 +110,7 @@ public final class Organism extends Entity {
         }
     }
 
-    // ─── Déplacement ─────────────────────────────────────────────────────────
+    // ─── Déplacement ──────────────────────────────────────────────────────────
 
     private void move(SimulationContext context) {
         int steps = Math.max(1, Math.round(dna.speed()));
@@ -123,13 +119,11 @@ public final class Organism extends Entity {
             if (target != null && target.isWithinBounds(context.getWidth(), context.getHeight())) {
                 Position from = position;
                 position = target;
-                this.targetX = position.x() + 0.5f;
-                this.targetY = position.y() + 0.5f;
-                this.floatZ = position.z() + 0.5f;
-                // Synchronise la position flottante héritée d'Entity,
-                // lue par le renderer via getFloatX() / getFloatY()
-                this.floatX  = this.targetX;
-                this.floatY  = this.targetY;
+                targetX  = position.x() + 0.5f;
+                targetY  = position.y() + 0.5f;
+                floatZ   = position.z();
+                floatX   = targetX;
+                floatY   = targetY;
                 context.updateEntityPosition(this, from);
             }
         }
@@ -139,34 +133,36 @@ public final class Organism extends Entity {
         int vision = Math.max(1, (int) dna.visionRadius());
         List<Entity> nearby = context.getEntitiesInRadius(position, vision);
 
-        // Comportement agressif : cherche une proie faible
-        if (dna.aggression() > 0.6f) {
+        // Priorité 1 — chasse (organismes plus faibles)
+        if (dna.aggression() > GameConstants.ORGANISM_AGGRESSION_HUNT_THRESHOLD) {
             var prey = nearby.stream()
                     .filter(e -> e instanceof Organism o && o != this && !o.isDead() && o.energy < energy)
                     .min(Comparator.comparingDouble(e -> e.getPosition().distanceTo2D(position)));
             if (prey.isPresent()) return stepToward(position, prey.get().getPosition());
         }
 
-        // Cherche nourriture : privilégie les nutriments, puis les plantes si pas de nutriments
+        // Priorité 2 — nutriments
         var nutrient = nearby.stream()
                 .filter(e -> e instanceof Nutrient && !e.isDead())
                 .min(Comparator.comparingDouble(e -> e.getPosition().distanceTo2D(position)));
+        if (nutrient.isPresent()) return stepToward(position, nutrient.get().getPosition());
 
-        if (nutrient.isPresent()) {
-            return stepToward(position, nutrient.get().getPosition());
-        }
-
-        // Si pas de nutriments proches, cherche des plantes
+        // Priorité 3 — plantes
         var plant = nearby.stream()
-                .filter(e -> e instanceof Plant && !e.isDead())
+                .filter(e -> e instanceof Plant p && !p.isDead() && canHuntPlant(p))
                 .min(Comparator.comparingDouble(e -> e.getPosition().distanceTo2D(position)));
+        if (plant.isPresent()) return stepToward(position, plant.get().getPosition());
 
-        if (plant.isPresent()) {
-            return stepToward(position, plant.get().getPosition());
-        }
-
-        // Déplacement aléatoire avec légère variation Z
         return randomNeighbor3D(context);
+    }
+
+    private boolean canHuntPlant(Plant plant) {
+        if (energy < GameConstants.ORGANISM_HUNGER_CRITICAL_THRESHOLD) return true;
+        float maturity = plant.getHeight() / GameConstants.PLANT_MAX_HEIGHT;
+        return switch (dna.diet()) {
+            case 1  -> maturity < GameConstants.ORGANISM_PLANT_MATURITY_HERBIVORE;
+            default -> maturity < GameConstants.ORGANISM_PLANT_MATURITY_DEFAULT;
+        };
     }
 
     private Position stepToward(Position from, Position to) {
@@ -179,118 +175,108 @@ public final class Organism extends Entity {
         }
     }
 
-    /**
-     * Déplacement aléatoire en 3D — z varie de manière fluide.
-     * Simule des organismes qui nagent/grimpent légèrement.
-     */
     private Position randomNeighbor3D(SimulationContext context) {
         int[] dx = {-1, 0, 1, 0};
-        int[] dy = {0, -1, 0, 1};
-        int dir = RNG.nextInt(4);
+        int[] dy = { 0,-1, 0, 1};
+        int dir  = RNG.nextInt(4);
 
-        int nx = position.gridX() + dx[dir];
-        int ny = position.gridY() + dy[dir];
-
-        // Variation verticale fluide : ajuste floatZ
         if (RNG.nextFloat() < 0.65f) {
-            float dz = RNG.nextBoolean() ? 1.0f : -1.0f;
-            float candidate = floatZ + dz;
-            int maxZ = context.getDepth();
-            if (candidate >= 0 && candidate < maxZ) floatZ = candidate;
+            float candidate = floatZ + RNG.nextFloat() * 0.4f - 0.2f;
+            if (candidate >= 0 && candidate < context.getDepth()) floatZ = candidate;
         }
 
-        int nz = (int) floatZ;
-
         try {
-            return new Position(nx, ny, nz);
+            return new Position(position.gridX() + dx[dir], position.gridY() + dy[dir], floatZ);
         } catch (IllegalArgumentException e) {
             return position;
         }
     }
 
-    // ─── Alimentation — BROUTAGE ──────────────────────────────────────────────
+    // ─── Alimentation ─────────────────────────────────────────────────────────
 
-    /**
-     * v3 — Broutage : l'organisme prend BITE_ENERGY par tick sur une plante
-     * sans la tuer instantanément. La plante ne meurt que si son énergie tombe à 0.
-     * Cela crée un cycle de prédation plus réaliste et évite l'effondrement rapide.
-     */
-    private void eat(SimulationContext context) {
-        // Priorité aux nutriments, plantes en dernier recours
+    private void eat(SimulationContext context, BiologicalConfig bio) {
         boolean ateNutrient = false;
-        boolean atePlant = false;
+        boolean atePlant    = false;
 
         for (Entity e : context.getEntitiesAt(position)) {
-            if (e instanceof Nutrient nutrient && !nutrient.isDead() && !ateNutrient) {
+
+            if (!ateNutrient && e instanceof Nutrient nutrient && !nutrient.isDead()) {
                 float gained = nutrient.getRichness();
-                energy = Math.min(energy + gained, ENERGY_MAX);
+                energy = Math.min(energy + gained, bio.organismEnergyMax());
                 nutrient.die();
                 context.scheduleRemoval(nutrient);
-                context.publishEvent(new SimulationEvent.EntityAte(
-                        id, nutrient.getId(), gained, Instant.now()));
+                context.publishEvent(new SimulationEvent.EntityAte(id, nutrient.getId(), gained, Instant.now()));
                 ateNutrient = true;
             }
 
-            if (e instanceof Plant plant && !plant.isDead() && !atePlant && !ateNutrient) {
-                float bite   = plant.getBiteEnergyForThis();
-                float gained = Math.min(bite, plant.getEnergy());
-                plant.consumeEnergy(bite);
-                energy = Math.min(energy + gained * 0.8f, ENERGY_MAX);
-                if (plant.isDead()) context.scheduleRemoval(plant);
-                context.publishEvent(new SimulationEvent.EntityAte(
-                        id, plant.getId(), gained, Instant.now()));
-                atePlant = true;
+            if (!atePlant && !ateNutrient && e instanceof Plant plant && !plant.isDead()) {
+                boolean canEat = switch (dna.diet()) {
+                    case 2, 3 -> false; // carnivore / cannibal
+                    default   -> true;
+                };
+                if (canEat) {
+                    float bite   = plant.getBiteEnergyForThis(bio);
+                    float gained = Math.min(bite, plant.getEnergy());
+                    plant.consumeEnergy(bite);
+                    energy = Math.min(energy + gained * GameConstants.ORGANISM_PLANT_BITE_EFFICIENCY,
+                            bio.organismEnergyMax());
+                    if (plant.isDead()) context.scheduleRemoval(plant);
+                    context.publishEvent(new SimulationEvent.EntityAte(id, plant.getId(), gained, Instant.now()));
+                    atePlant = true;
+                }
             }
 
-            // Agression : vol d'énergie sur un organisme affaibli
-            if (dna.aggression() > 0.7f
-                    && e instanceof Organism prey
-                    && prey != this
-                    && !prey.isDead()
-                    && prey.energy < energy * 0.5f) {
-                float stolen = prey.energy * 0.25f;
-                prey.consumeEnergy(stolen);
-                energy = Math.min(energy + stolen * 0.6f, ENERGY_MAX);
-                return;
+            // Vol d'énergie sur organisme affaibli
+            if (e instanceof Organism prey && prey != this && !prey.isDead()
+                    && dna.aggression() > GameConstants.ORGANISM_AGGRESSION_STEAL_THRESHOLD
+                    && prey.energy < energy * GameConstants.ORGANISM_PREY_ENERGY_RATIO) {
+                boolean canSteal = switch (dna.diet()) {
+                    case 1  -> false;
+                    default -> true;
+                };
+                if (canSteal) {
+                    float stolen = prey.energy * GameConstants.ORGANISM_STEAL_FRACTION;
+                    prey.consumeEnergy(stolen);
+                    energy = Math.min(energy + stolen * GameConstants.ORGANISM_STEAL_EFFICIENCY,
+                            bio.organismEnergyMax());
+                    return;
+                }
             }
         }
     }
 
     // ─── Fusion ───────────────────────────────────────────────────────────────
 
-    private void tryMerge(SimulationContext context) {
-        if (mergeCooldown > 0 || energy < 40f || isDead()) return;
+    private void tryMerge(SimulationContext context, BiologicalConfig bio) {
+        if (mergeCooldown > 0 || energy < GameConstants.ORGANISM_MERGE_MIN_ENERGY || isDead()) return;
 
         context.getEntitiesInRadius(position, 1).stream()
                 .filter(e -> e instanceof Organism other
                         && other != this
                         && !other.isDead()
                         && other.mergeCooldown == 0
-                        && other.energy >= 40f
-                        && dna.distance(other.dna) < MERGE_THRESHOLD
-                        && energy + other.energy <= MAX_MERGED_ENERGY)
+                        && other.energy >= GameConstants.ORGANISM_MERGE_MIN_ENERGY
+                        && dna.distance(other.dna) < bio.organismMergeThreshold()
+                        && energy + other.energy <= GameConstants.ORGANISM_MAX_MERGED_ENERGY)
                 .findFirst()
                 .map(e -> (Organism) e)
-                .ifPresent(partner -> {
-                    DNA mergedDNA     = DNA.merge(dna, partner.dna);
-                    float mergedEnergy = Math.min(energy + partner.energy, MAX_MERGED_ENERGY);
-                    context.findFreePositionNear(position, 1).ifPresent(pos -> {
-                        Organism merged = new Organism(pos, mergedEnergy, Gender.random(),
-                                Math.max(generation, partner.generation) + 1, mergedDNA);
-                        context.spawnOrganism(merged);
-                        context.publishEvent(new SimulationEvent.EntityMerged(
-                                id, partner.id, merged.getId(), pos, Instant.now()));
-                        this.die();
-                        context.scheduleRemoval(this);
-                        partner.die();
-                        context.scheduleRemoval(partner);
-                    });
-                });
+                .ifPresent(partner -> context.findFreePositionNear(position, 1).ifPresent(pos -> {
+                    float mergedEnergy = Math.min(energy + partner.energy,
+                            GameConstants.ORGANISM_MAX_MERGED_ENERGY);
+                    Organism merged = new Organism(pos, mergedEnergy, Gender.random(),
+                            Math.max(generation, partner.generation) + 1,
+                            DNA.merge(dna, partner.dna));
+                    context.spawnOrganism(merged);
+                    context.publishEvent(new SimulationEvent.EntityMerged(
+                            id, partner.id, merged.getId(), pos, Instant.now()));
+                    this.die();    context.scheduleRemoval(this);
+                    partner.die(); context.scheduleRemoval(partner);
+                }));
     }
 
     // ─── Reproduction ─────────────────────────────────────────────────────────
 
-    private void reproduce(SimulationContext context) {
+    private void reproduce(SimulationContext context, BiologicalConfig bio) {
         if (reproductionCooldown > 0 || energy < dna.reproEnergy()) return;
 
         context.getEntitiesInRadius(position, (int) dna.visionRadius()).stream()
@@ -302,15 +288,38 @@ public final class Organism extends Entity {
                 .map(e -> (Organism) e)
                 .findFirst()
                 .ifPresent(partner -> context.findFreePositionNear(position, 2).ifPresent(birthPos -> {
-                    Organism child = Organism.offspring(this, partner, birthPos, context.getMutationRate());
+                    Organism child = Organism.offspring(
+                            this, partner, birthPos, context.getMutationRate(), bio.organismEnergyStart());
                     context.spawnOrganism(child);
-                    consumeEnergy(REPRO_COST);
-                    partner.consumeEnergy(REPRO_COST);
-                    reproductionCooldown = (int) REPRO_COOLDOWN_TICKS;
-                    partner.reproductionCooldown = (int) REPRO_COOLDOWN_TICKS;
+                    consumeEnergy(bio.organismReproCost());
+                    partner.consumeEnergy(bio.organismReproCost());
+                    reproductionCooldown        = bio.organismReproCooldown();
+                    partner.reproductionCooldown = bio.organismReproCooldown();
                     context.publishEvent(new SimulationEvent.EntityReproduced(
                             id, partner.id, child.getId(), birthPos, Instant.now()));
                 }));
+    }
+
+    // ─── Dépenses énergétiques ────────────────────────────────────────────────
+
+    private void payEnergyCosts(SimulationContext context, BiologicalConfig bio) {
+        // Métabolisme génomique + pénalité adaptative du régulateur
+        consumeEnergy(dna.metabolism() + context.getOrganismMetabolismPenalty());
+
+        // Coût de la taille
+        consumeEnergy((dna.size() - GameConstants.ORGANISM_SIZE_COST_BASE)
+                * GameConstants.ORGANISM_SIZE_COST_FACTOR);
+
+        // Pénalité de solitude
+        boolean hasNeighbour = context.getEntitiesInRadius(position, 3).stream()
+                .anyMatch(e -> e instanceof Organism o && o != this && !o.isDead());
+        if (!hasNeighbour) consumeEnergy(GameConstants.ORGANISM_LONE_PENALTY);
+
+        // Vieillissement quadratique : 0.15 × ((age − start) / start)²
+        if (age > bio.organismAgePenaltyStart()) {
+            float ageRatio = (float)(age - bio.organismAgePenaltyStart()) / bio.organismAgePenaltyStart();
+            consumeEnergy(GameConstants.ORGANISM_AGE_PENALTY_FACTOR * ageRatio * ageRatio);
+        }
     }
 
     // ─── Accesseurs ───────────────────────────────────────────────────────────
@@ -319,12 +328,12 @@ public final class Organism extends Entity {
     public float getVisionRadius() { return dna.visionRadius(); }
     public float getMetabolism()   { return dna.metabolism(); }
     public float getRenderRadius() { return dna.size(); }
-    public float getFloatZ() { return floatZ; }
+    public float getFloatZ()       { return floatZ; }
 
     @Override public String typeName() { return "ORGANISM"; }
 
     @Override public String toString() {
-        return "Organism{id=%d, gen=%d, gender=%s, energy=%.1f, age=%d, z=%d}"
-                .formatted(id, generation, gender, energy, age, position.z());
+        return "Organism{id=%d, gen=%d, gender=%s, energy=%.1f, age=%d, z=%.2f}"
+                .formatted(id, generation, gender, energy, age, floatZ);
     }
 }

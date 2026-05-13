@@ -1,6 +1,8 @@
 package com.kether.pixellife.backend.model;
 
+import com.kether.pixellife.backend.constant.GameConstants;
 import com.kether.pixellife.backend.engine.SimulationContext;
+import com.kether.pixellife.common.model.BiologicalConfig;
 import com.kether.pixellife.common.model.Position;
 import lombok.Getter;
 
@@ -8,38 +10,29 @@ import java.util.random.RandomGenerator;
 import java.util.random.RandomGeneratorFactory;
 
 /**
- * Nutriment — v4.
+ * Nutriment — particule d'énergie flottante en mouvement brownien 3D.
  *
- * Nouveauté : déplacement 3D flottant avec courant fictif.
- * Les nutriments dérivent dans l'espace comme des particules dans un fluide.
- *  - Vélocité flottante (vx, vy, vz) en float → position accumulée
- *  - La vélocité subit une légère perturbation aléatoire à chaque tick (brownian motion)
- *  - Courant fictif : variation lente de Z entre les couches (monte/descend occasionnellement)
- *  - Durée de vie réduite (dégradation 0.012/tick) → moins de nutriments accumulés
- *  - Ne se déplace que dans les limites de la grille 3D
+ * <p>Les nutriments dérivent dans l'espace comme des particules dans un fluide.
+ * Leurs paramètres physiques (vitesse, friction, dégradation) sont configurables
+ * via {@link BiologicalConfig}.</p>
  *
- * Résultat visuel : les nutriments flottent et tourbillonnent dans l'espace,
- * variant lentement entre les couches avec un effet de courant fictif.
+ * <h3>Physique du mouvement</h3>
+ * <pre>
+ *   vx += bruit() × brownianForce   // perturbation aléatoire
+ *   vx *= drag                       // amortissement fluide
+ *   fx += vx                         // intégration position
+ * </pre>
+ * L'axe Z (vertical) se déplace plus lentement que X/Y ({@code Z_SPEED_RATIO}).
+ * Un "burst" de courant vertical se produit aléatoirement tous les ~20 ticks.
  */
 @Getter
 public final class Nutrient extends Entity {
 
-    private static final RandomGenerator RNG =
-            RandomGeneratorFactory.getDefault().create();
+    private static final RandomGenerator RNG = RandomGeneratorFactory.getDefault().create();
 
-    // ─── Paramètres de flottaison ─────────────────────────────────────────────
-    private static final float DRIFT_SPEED     = 0.12f;   // vitesse max de dérive
-    private static final float BROWNIAN_FORCE  = 0.03f;  // perturbation aléatoire par tick
-    private static final float CURRENT_FORCE   = 0.02f;  // force du courant fictif (lent)
-    private static final float DRAG            = 0.92f;   // amortissement (friction)
-    private static final float METABOLISM      = 0.06f;   // dégradation naturelle /tick — 5× plus vite pour éviter l'accumulation
+    private final float richness; // énergie transférée à l'organisme à la consommation
 
-    private final float richness;  // énergie transférée à l'organisme à la consommation
-
-    // Vélocité flottante accumulée — X, Y et Z lent pour variation entre couches
-    private float vx = 0f, vy = 0f, vz = 0f;
-
-    // Position accumulée en float pour interpolation sub-cellulaire
+    private float vx, vy, vz;
     private float fx, fy, fz;
 
     public Nutrient(Position position, float energy, float richness) {
@@ -49,63 +42,62 @@ public final class Nutrient extends Entity {
         this.fy = position.y();
         this.fz = position.z();
 
-        // Vitesse initiale aléatoire faible (X et Y seulement)
-        this.vx = (RNG.nextFloat() - 0.5f) * DRIFT_SPEED;
-        this.vy = (RNG.nextFloat() - 0.5f) * DRIFT_SPEED;
+        // Vitesse initiale aléatoire faible sur X/Y (Z commence immobile)
+        float initSpeed = BiologicalConfig.defaults().nutrientDriftSpeed();
+        this.vx = (RNG.nextFloat() - 0.5f) * initSpeed;
+        this.vy = (RNG.nextFloat() - 0.5f) * initSpeed;
     }
 
     // ─── Cycle de vie ─────────────────────────────────────────────────────────
 
     @Override
     public void update(SimulationContext context) {
-        drift(context);
-        consumeEnergy(METABOLISM);
+        BiologicalConfig bio = context.getBiologicalConfig();
+        drift(context, bio);
+        consumeEnergy(bio.nutrientMetabolism());
     }
 
-    /**
-     * Mouvement brownien en 3D avec courant fictif — simule la diffusion dans un fluide.
-     * Les nutriments varient lentement entre les couches Z avec un courant fictif.
-     */
-    private void drift(SimulationContext context) {
-        // Perturbation aléatoire (mouvement brownien) — X, Y et Z lent
-        vx += (RNG.nextFloat() - 0.5f) * BROWNIAN_FORCE;
-        vy += (RNG.nextFloat() - 0.5f) * BROWNIAN_FORCE;
+    // ─── Physique brownienne 3D ───────────────────────────────────────────────
 
-        // Courant fictif : variation lente de Z (monte/descend occasionnellement)
-        if (RNG.nextFloat() < 0.05f) {  // 5% de chance par tick de changer de direction Z
-            vz += (RNG.nextFloat() - 0.5f) * CURRENT_FORCE * 4;
-        } else {
-            vz += (RNG.nextFloat() - 0.5f) * CURRENT_FORCE * 0.2f;  // variation très lente sinon
-        }
+    private void drift(SimulationContext context, BiologicalConfig bio) {
+        float maxSpeed = bio.nutrientDriftSpeed();
+        float brownian = bio.nutrientBrownianForce();
+        float drag     = bio.nutrientDrag();
 
-        // Amortissement (drag fluide) — X, Y et Z
-        vx *= DRAG;
-        vy *= DRAG;
-        vz *= DRAG;
+        // Perturbation brownienne X/Y
+        vx += (RNG.nextFloat() - 0.5f) * brownian;
+        vy += (RNG.nextFloat() - 0.5f) * brownian;
 
-        // Clamp de vitesse — X, Y et Z
-        vx = clamp(vx, -DRIFT_SPEED, DRIFT_SPEED);
-        vy = clamp(vy, -DRIFT_SPEED, DRIFT_SPEED);
-        vz = clamp(vz, -DRIFT_SPEED * 0.5f, DRIFT_SPEED * 0.5f);  // Z plus lent
+        // Courant vertical — burst occasionnel + variation douce
+        vz += RNG.nextFloat() < GameConstants.NUTRIENT_Z_BURST_CHANCE
+                ? (RNG.nextFloat() - 0.5f) * GameConstants.NUTRIENT_CURRENT_FORCE * GameConstants.NUTRIENT_Z_BURST_FACTOR
+                : (RNG.nextFloat() - 0.5f) * GameConstants.NUTRIENT_CURRENT_FORCE * GameConstants.NUTRIENT_Z_DRIFT_DAMPING;
 
-        // Intégration de position — X, Y et Z
-        fx += vx;
-        fy += vy;
-        fz += vz;
+        // Amortissement fluide
+        vx *= drag;
+        vy *= drag;
+        vz *= drag;
 
-        // Rebond sur les bords (réflexion) — X et Y seulement (Z peut varier librement)
-        if (fx < 0)                         { fx = 0;                       vx = Math.abs(vx); }
-        if (fx >= context.getWidth())       { fx = context.getWidth()  - 1; vx = -Math.abs(vx); }
-        if (fy < 0)                         { fy = 0;                       vy = Math.abs(vy); }
-        if (fy >= context.getHeight())      { fy = context.getHeight() - 1; vy = -Math.abs(vy); }
+        // Clamp vitesses
+        vx = clamp(vx, -maxSpeed,                            maxSpeed);
+        vy = clamp(vy, -maxSpeed,                            maxSpeed);
+        vz = clamp(vz, -maxSpeed * GameConstants.NUTRIENT_Z_SPEED_RATIO,
+                maxSpeed * GameConstants.NUTRIENT_Z_SPEED_RATIO);
 
-        // Z : rebond sur les limites de profondeur
-        if (fz < 0)                         { fz = 0;                       vz = Math.abs(vz); }
-        if (fz >= context.getDepth())       { fz = context.getDepth() - 1; vz = -Math.abs(vz); }
+        // Intégration position
+        fx += vx; fy += vy; fz += vz;
 
-        // Mise à jour de la position discrète seulement si le nutriment change de cellule
+        // Rebonds sur les bords
+        if (fx < 0)                     { fx = 0;                        vx =  Math.abs(vx); }
+        if (fx >= context.getWidth())   { fx = context.getWidth()  - 1f; vx = -Math.abs(vx); }
+        if (fy < 0)                     { fy = 0;                        vy =  Math.abs(vy); }
+        if (fy >= context.getHeight())  { fy = context.getHeight() - 1f; vy = -Math.abs(vy); }
+        if (fz < 0)                     { fz = 0;                        vz =  Math.abs(vz); }
+        if (fz >= context.getDepth())   { fz = context.getDepth()  - 1f; vz = -Math.abs(vz); }
+
+        // Mise à jour de la position discrète seulement si changement de cellule
         int nx = (int) fx, ny = (int) fy, nz = (int) fz;
-        if (nx != position.x() || ny != position.y() || nz != position.z()) {
+        if (nx != position.gridX() || ny != position.gridY() || nz != position.gridZ()) {
             Position oldPos = position;
             position = new Position(nx, ny, nz);
             context.updateEntityPosition(this, oldPos);
@@ -113,7 +105,7 @@ public final class Nutrient extends Entity {
     }
 
     /**
-     * Position flottante continue pour le renderer (interpolation sub-cellulaire).
+     * Position flottante continue [x, y, z] pour le renderer.
      * Permet une animation fluide sans saccades entre cellules.
      */
     public float[] getFloatPosition() {
