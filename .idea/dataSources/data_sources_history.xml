@@ -1,0 +1,43 @@
+<DataSourcesHistory>
+  <DataSourceFromHistory isRemovedFromProject="false">
+    <data-source source="LOCAL" name="pixellife.db" uuid="814fd29d-3ae1-4e38-a798-4e6ea90f1449">
+      <database-info product="SQLite" version="3.51.1" jdbc-version="4.2" driver-name="SQLite JDBC" driver-version="3.51.1.0" dbms="SQLITE" exact-version="3.51.1" exact-driver-version="3.51">
+        <identifier-quote-string>&quot;</identifier-quote-string>
+      </database-info>
+      <case-sensitivity plain-identifiers="mixed" quoted-identifiers="mixed" />
+      <driver-ref>sqlite.xerial</driver-ref>
+      <synchronize>true</synchronize>
+      <jdbc-driver>org.sqlite.JDBC</jdbc-driver>
+      <jdbc-url>jdbc:sqlite:D:\dev\pixellife.db</jdbc-url>
+      <secret-storage>master_key</secret-storage>
+      <auth-provider>no-auth</auth-provider>
+      <schema-mapping>
+        <introspection-scope>
+          <node kind="schema" qname="@" />
+        </introspection-scope>
+      </schema-mapping>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </data-source>
+  </DataSourceFromHistory>
+  <DataSourceFromHistory isRemovedFromProject="false">
+    <data-source source="LOCAL" name="pixellife.db" uuid="b4e4f310-2935-489a-aeb1-f6f534dd8951">
+      <database-info product="SQLite" version="3.51.1" jdbc-version="4.2" driver-name="SQLite JDBC" driver-version="3.51.1.0" dbms="SQLITE" exact-version="3.51.1" exact-driver-version="3.51">
+        <identifier-quote-string>&quot;</identifier-quote-string>
+      </database-info>
+      <case-sensitivity plain-identifiers="mixed" quoted-identifiers="mixed" />
+      <driver-ref>sqlite.xerial</driver-ref>
+      <synchronize>true</synchronize>
+      <imported>true</imported>
+      <remarks>D:/dev/pixellifesim/backend/src/main/resources/application.properties</remarks>
+      <jdbc-driver>org.sqlite.JDBC</jdbc-driver>
+      <jdbc-url>jdbc:sqlite:../pixellife.db</jdbc-url>
+      <auth-provider>no-auth</auth-provider>
+      <schema-mapping>
+        <introspection-scope>
+          <node kind="schema" qname="@" />
+        </introspection-scope>
+      </schema-mapping>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </data-source>
+  </DataSourceFromHistory>
+</DataSourcesHistory>

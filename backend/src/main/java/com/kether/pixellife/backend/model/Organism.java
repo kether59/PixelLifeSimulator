@@ -16,21 +16,14 @@ import java.util.random.RandomGenerator;
 import java.util.random.RandomGeneratorFactory;
 
 /**
- * Organisme vivant — consommateur mobile de l'écosystème.
+ * Organisme vivant — v2.
  *
- * <p>Le comportement (vitesse, vision, régime, agressivité) est entièrement
- * codé dans le {@link DNA}. Les seuils biologiques (énergie, coûts, âge)
- * sont lus depuis {@link BiologicalConfig} à chaque tick.</p>
- *
- * <h3>Cycle de vie par tick</h3>
- * <ol>
- *   <li>Vieillissement — mort garantie à {@code organismMaxAge}</li>
- *   <li>Déplacement — vers proie / nutriment / plante / aléatoire</li>
- *   <li>Alimentation — nutriment > plante > vol sur organisme affaibli</li>
- *   <li>Fusion — si génomes proches et assez d'énergie</li>
- *   <li>Reproduction — sexuée avec partenaire à portée</li>
- *   <li>Dépenses — métabolisme, taille, solitude, vieillissement</li>
- * </ol>
+ * Ajout v2 : pénalité de disette alimentaire.
+ * Quand un organisme est en état de faim (énergie < 60% du max) et qu'aucune
+ * source de nourriture n'est visible dans son rayon de vision, il subit une
+ * pénalité supplémentaire ({@link GameConstants#ORGANISM_FOOD_SCARCITY_PENALTY}).
+ * Cela rend les plantes indispensables aux herbivores/omnivores et favorise
+ * un équilibre prédateur/proie plus réaliste.
  */
 @Getter
 public final class Organism extends Entity {
@@ -57,25 +50,11 @@ public final class Organism extends Entity {
 
     // ─── Factories ────────────────────────────────────────────────────────────
 
-    /**
-     * Crée un organisme avec ADN aléatoire muté et l'énergie de départ configurée.
-     *
-     * @param position    position initiale
-     * @param startEnergy énergie de départ (issue de {@link BiologicalConfig#organismEnergyStart()})
-     */
     public static Organism spawn(Position position, float startEnergy) {
         DNA dna = DNA.defaults().mutate(0.15f, RNG);
         return new Organism(position, startEnergy, Gender.random(), 0, dna);
     }
 
-    /**
-     * Crée un enfant par croisement des génomes parentaux puis mutation.
-     *
-     * @param a, b         parents
-     * @param position     position de naissance
-     * @param mutationRate taux de mutation (depuis SimulationConfig)
-     * @param startEnergy  énergie de départ (depuis BiologicalConfig)
-     */
     public static Organism offspring(Organism a, Organism b, Position position,
                                      float mutationRate, float startEnergy) {
         DNA childDna = DNA.crossover(a.dna, b.dna, RNG).mutate(mutationRate, RNG);
@@ -133,7 +112,6 @@ public final class Organism extends Entity {
         int vision = Math.max(1, (int) dna.visionRadius());
         List<Entity> nearby = context.getEntitiesInRadius(position, vision);
 
-        // Priorité 1 — chasse (organismes plus faibles)
         if (dna.aggression() > GameConstants.ORGANISM_AGGRESSION_HUNT_THRESHOLD) {
             var prey = nearby.stream()
                     .filter(e -> e instanceof Organism o && o != this && !o.isDead() && o.energy < energy)
@@ -141,13 +119,11 @@ public final class Organism extends Entity {
             if (prey.isPresent()) return stepToward(position, prey.get().getPosition());
         }
 
-        // Priorité 2 — nutriments
         var nutrient = nearby.stream()
                 .filter(e -> e instanceof Nutrient && !e.isDead())
                 .min(Comparator.comparingDouble(e -> e.getPosition().distanceTo2D(position)));
         if (nutrient.isPresent()) return stepToward(position, nutrient.get().getPosition());
 
-        // Priorité 3 — plantes
         var plant = nearby.stream()
                 .filter(e -> e instanceof Plant p && !p.isDead() && canHuntPlant(p))
                 .min(Comparator.comparingDouble(e -> e.getPosition().distanceTo2D(position)));
@@ -179,12 +155,10 @@ public final class Organism extends Entity {
         int[] dx = {-1, 0, 1, 0};
         int[] dy = { 0,-1, 0, 1};
         int dir  = RNG.nextInt(4);
-
         if (RNG.nextFloat() < 0.65f) {
             float candidate = floatZ + RNG.nextFloat() * 0.4f - 0.2f;
             if (candidate >= 0 && candidate < context.getDepth()) floatZ = candidate;
         }
-
         try {
             return new Position(position.gridX() + dx[dir], position.gridY() + dy[dir], floatZ);
         } catch (IllegalArgumentException e) {
@@ -199,7 +173,6 @@ public final class Organism extends Entity {
         boolean atePlant    = false;
 
         for (Entity e : context.getEntitiesAt(position)) {
-
             if (!ateNutrient && e instanceof Nutrient nutrient && !nutrient.isDead()) {
                 float gained = nutrient.getRichness();
                 energy = Math.min(energy + gained, bio.organismEnergyMax());
@@ -211,7 +184,7 @@ public final class Organism extends Entity {
 
             if (!atePlant && !ateNutrient && e instanceof Plant plant && !plant.isDead()) {
                 boolean canEat = switch (dna.diet()) {
-                    case 2, 3 -> false; // carnivore / cannibal
+                    case 2, 3 -> false;
                     default   -> true;
                 };
                 if (canEat) {
@@ -226,7 +199,6 @@ public final class Organism extends Entity {
                 }
             }
 
-            // Vol d'énergie sur organisme affaibli
             if (e instanceof Organism prey && prey != this && !prey.isDead()
                     && dna.aggression() > GameConstants.ORGANISM_AGGRESSION_STEAL_THRESHOLD
                     && prey.energy < energy * GameConstants.ORGANISM_PREY_ENERGY_RATIO) {
@@ -261,8 +233,7 @@ public final class Organism extends Entity {
                 .findFirst()
                 .map(e -> (Organism) e)
                 .ifPresent(partner -> context.findFreePositionNear(position, 1).ifPresent(pos -> {
-                    float mergedEnergy = Math.min(energy + partner.energy,
-                            GameConstants.ORGANISM_MAX_MERGED_ENERGY);
+                    float mergedEnergy = Math.min(energy + partner.energy, GameConstants.ORGANISM_MAX_MERGED_ENERGY);
                     Organism merged = new Organism(pos, mergedEnergy, Gender.random(),
                             Math.max(generation, partner.generation) + 1,
                             DNA.merge(dna, partner.dna));
@@ -303,7 +274,7 @@ public final class Organism extends Entity {
     // ─── Dépenses énergétiques ────────────────────────────────────────────────
 
     private void payEnergyCosts(SimulationContext context, BiologicalConfig bio) {
-        // Métabolisme génomique + pénalité adaptative du régulateur
+        // Métabolisme + pénalité adaptative du régulateur
         consumeEnergy(dna.metabolism() + context.getOrganismMetabolismPenalty());
 
         // Coût de la taille
@@ -315,10 +286,55 @@ public final class Organism extends Entity {
                 .anyMatch(e -> e instanceof Organism o && o != this && !o.isDead());
         if (!hasNeighbour) consumeEnergy(GameConstants.ORGANISM_LONE_PENALTY);
 
-        // Vieillissement quadratique : 0.15 × ((age − start) / start)²
+        // Vieillissement quadratique
         if (age > bio.organismAgePenaltyStart()) {
             float ageRatio = (float)(age - bio.organismAgePenaltyStart()) / bio.organismAgePenaltyStart();
             consumeEnergy(GameConstants.ORGANISM_AGE_PENALTY_FACTOR * ageRatio * ageRatio);
+        }
+
+        // ── Pénalité de disette ────────────────────────────────────────────────
+        // Active si : énergie faible ET aucune nourriture en vue
+        applyFoodScarcityPenalty(context, bio);
+    }
+
+    /**
+     * Pénalité énergétique supplémentaire quand l'organisme est en état de faim
+     * et qu'aucune source de nourriture appropriée n'est visible.
+     *
+     * <p>Réalisme : un animal qui cherche de la nourriture sans en trouver
+     * brûle plus d'énergie que s'il était au repos.</p>
+     *
+     * <p>Règles selon le régime alimentaire :
+     * <ul>
+     *   <li>Omnivore (0) / Herbivore (1) : nourriture = nutriments OU plantes</li>
+     *   <li>Carnivore (2) : nourriture = nutriments OU organismes plus faibles (si agressif)</li>
+     *   <li>Cannibal (3) : nourriture = nutriments OU tout organisme plus faible</li>
+     * </ul></p>
+     */
+    private void applyFoodScarcityPenalty(SimulationContext context, BiologicalConfig bio) {
+        // Seuil de faim non atteint → pas de pénalité
+        if (energy >= bio.organismEnergyMax() * GameConstants.ORGANISM_FOOD_SCARCITY_THRESHOLD) return;
+
+        int   vision      = Math.max(2, (int) dna.visionRadius());
+        int   dietVal     = dna.diet();
+        boolean needsPlant  = (dietVal == 0 || dietVal == 1); // omnivore / herbivore
+        boolean needsAnimal = (dietVal >= 2);                  // carnivore / cannibal
+        boolean canAggress  = dna.aggression() > GameConstants.ORGANISM_AGGRESSION_HUNT_THRESHOLD;
+
+        boolean hasFood = context.getEntitiesInRadius(position, vision).stream()
+                .anyMatch(e -> {
+                    if (e.isDead()) return false;
+                    if (e instanceof Nutrient)                        return true;
+                    if (e instanceof Plant && needsPlant)             return true;
+                    if (e instanceof Organism prey && prey != this) {
+                        if (needsAnimal && prey.energy < energy)      return true;
+                        if (canAggress  && prey.energy < energy)      return true;
+                    }
+                    return false;
+                });
+
+        if (!hasFood) {
+            consumeEnergy(GameConstants.ORGANISM_FOOD_SCARCITY_PENALTY);
         }
     }
 

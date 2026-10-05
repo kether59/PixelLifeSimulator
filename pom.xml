@@ -25,7 +25,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spring-boot.version>4.0.5</spring-boot.version>
         <lombok.version>1.18.44</lombok.version>
-        <lwjgl.version>3.3.4</lwjgl.version>
+        <lwjgl.version>3.4.1</lwjgl.version>
     </properties>
 
     <dependencyManagement>
